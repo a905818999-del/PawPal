@@ -17,6 +17,8 @@ const goldenPuppy = (state: PetState, name: string): string =>
   `pet_assets/金毛 puppy/${state}/${name}`;
 const lineDog = (state: PetState, name: string): string => `pet_assets/线条小狗/${state}/${name}`;
 
+const mainPixelAvatar = (name: string): string => `pet_assets/main_pixel_avatar/${name}`;
+
 const STATE_FALLBACKS: Partial<Record<PetState, PetState>> = {
   breakDone: "happy",
   hydrationDone: "happy",
@@ -24,6 +26,32 @@ const STATE_FALLBACKS: Partial<Record<PetState, PetState>> = {
 };
 
 export const PET_APPEARANCES: Record<PetAppearanceId, PetAppearanceManifest> = {
+  mainPixelAvatar: {
+    id: "mainPixelAvatar",
+    label: {
+      "zh-CN": "Main Pixel Avatar (draft)",
+      en: "Main Pixel Avatar (draft)"
+    },
+    fallback: {
+      path: mainPixelAvatar("idle.webp"),
+      isPlaceholder: true
+    },
+    states: {
+      idle: { path: mainPixelAvatar("idle.webp"), isPlaceholder: true },
+      sitting: { path: mainPixelAvatar("sitting.webp"), isPlaceholder: true },
+      happy: { path: mainPixelAvatar("happy.webp"), isPlaceholder: true },
+      breakPrompt: { path: mainPixelAvatar("breakPrompt.webp"), isPlaceholder: true },
+      breakRunning: { path: mainPixelAvatar("breakRunning.webp"), isPlaceholder: true },
+      breakDone: { path: mainPixelAvatar("breakDone.webp"), isPlaceholder: true },
+      hydrationPrompt: { path: mainPixelAvatar("hydrationPrompt.webp"), isPlaceholder: true },
+      drinking: { path: mainPixelAvatar("drinking.webp"), isPlaceholder: true },
+      hydrationDone: { path: mainPixelAvatar("hydrationDone.webp"), isPlaceholder: true },
+      focusGuard: { path: mainPixelAvatar("focusGuard.webp"), isPlaceholder: true },
+      focusDone: { path: mainPixelAvatar("focusDone.webp"), isPlaceholder: true },
+      sad: { path: mainPixelAvatar("sad.webp"), isPlaceholder: true },
+      sleeping: { path: mainPixelAvatar("sleeping.webp"), isPlaceholder: true }
+    }
+  },
   lovartPuppy: {
     id: "lovartPuppy",
     label: {
@@ -150,7 +178,9 @@ export const PET_APPEARANCES: Record<PetAppearanceId, PetAppearanceManifest> = {
 };
 
 export function resolvePetAppearanceId(value: unknown): PetAppearanceId {
-  return value === "lineDog" ? "lineDog" : "lovartPuppy";
+  if (value === "lineDog") return "lineDog";
+  if (value === "mainPixelAvatar") return "mainPixelAvatar";
+  return "lovartPuppy";
 }
 
 export function petAppearanceOptions(language: Language): Array<{ value: PetAppearanceId; label: string }> {

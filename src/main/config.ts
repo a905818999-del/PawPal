@@ -23,3 +23,15 @@ export const IS_DEV = Boolean(process.env.ELECTRON_RENDERER_URL);
 
 export const BREAK_RUN_DURATION_MS = 60_000;
 export const BREAK_RUN_TICK_MS = 16;
+
+function durationFromEnv(name: string, fallbackMs: number): number {
+  const value = Number(process.env[name]);
+  if (!Number.isFinite(value) || value <= 0) return fallbackMs;
+  return value;
+}
+
+export const IDLE_SLEEP_DELAY_MS = durationFromEnv("DESKPET_IDLE_SLEEP_DELAY_MS", 10 * 60_000);
+export const IDLE_SLEEP_DURATION_MS = durationFromEnv(
+  "DESKPET_IDLE_SLEEP_DURATION_MS",
+  10 * 60_000
+);

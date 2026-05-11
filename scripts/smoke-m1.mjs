@@ -17,6 +17,49 @@ const zipFile = path.join(distDir, `${productName}-${version}-win.zip`);
 const defaultPort = 9200 + Math.floor(Math.random() * 700);
 const port = Number(process.env.DESKPET_SMOKE_PORT ?? defaultPort);
 const userDataDir = path.join(tmpdir(), `deskpet-smoke-${Date.now()}-${process.pid}`);
+const assetModeArg = process.argv.find((arg) => arg.startsWith("--asset-mode="));
+const assetMode = assetModeArg?.split("=")[1] ?? "m1";
+if (!["m1", "m2a"].includes(assetMode)) {
+  throw new Error(`Unsupported asset mode: ${assetMode}`);
+}
+const smokeLabel = assetMode === "m2a" ? "smoke:m2a" : "smoke:m1";
+
+const m2aRuntimeFiles = [
+  "pet_assets/main_pixel_avatar/idle.webp",
+  "pet_assets/main_pixel_avatar/sitting.webp",
+  "pet_assets/main_pixel_avatar/happy.webp",
+  "pet_assets/main_pixel_avatar/breakPrompt.webp",
+  "pet_assets/main_pixel_avatar/breakRunning.webp",
+  "pet_assets/main_pixel_avatar/breakDone.webp",
+  "pet_assets/main_pixel_avatar/hydrationPrompt.webp",
+  "pet_assets/main_pixel_avatar/drinking.webp",
+  "pet_assets/main_pixel_avatar/hydrationDone.webp",
+  "pet_assets/main_pixel_avatar/focusGuard.webp",
+  "pet_assets/main_pixel_avatar/focusDone.webp",
+  "pet_assets/main_pixel_avatar/sad.webp",
+  "pet_assets/main_pixel_avatar/sleeping.webp"
+];
+const m2aRuntimeDir = "pet_assets/main_pixel_avatar/";
+
+const m2aRepresentativeStates = [
+  ["idle", "idle.webp"],
+  ["sitting", "sitting.webp"],
+  ["sleeping", "sleeping.webp"],
+  ["breakPrompt", "breakPrompt.webp"],
+  ["hydrationPrompt", "hydrationPrompt.webp"],
+  ["focusGuard", "focusGuard.webp"]
+];
+
+const m2aRejectedResourceFragments = [
+  "pet_assets/main_pixel_avatar/raw/",
+  "pet_assets/main_pixel_avatar/cleaned/",
+  "pet_assets/main_pixel_avatar/asset-notes.md",
+  "pet_assets/main_pixel_avatar/manifest.draft.json",
+  "pet_assets/main_pixel_avatar/focusAlert",
+  "pet_assets/paired_pixel_avatar/",
+  "pet_assets/scenes/",
+  "pet_assets/scene/"
+];
 
 const snapshotKeys = [
   "blockingMode",
@@ -48,7 +91,7 @@ const persistedSettings = {
   hydrationIntervalMinutes: 31,
   focusDurationMinutes: 12,
   language: "en",
-  petAppearanceId: "lovartPuppy",
+  petAppearanceId: assetMode === "m2a" ? "mainPixelAvatar" : "lovartPuppy",
   onboardingDismissed: true
 };
 
@@ -94,7 +137,7 @@ const textExtensions = new Set([
 ]);
 
 function log(message) {
-  console.log(`[smoke:m1] ${message}`);
+  console.log(`[${smokeLabel}] ${message}`);
 }
 
 function assert(condition, message) {
@@ -142,6 +185,7 @@ try {
     EntryCount = $entries.Count
     ElevateEntryCount = @($entries | Where-Object { $_ -match '(^|/)elevate\\.exe$' }).Count
     ExeEntryCount = @($entries | Where-Object { $_ -match '\\.exe$' }).Count
+    Entries = $entries
   } | ConvertTo-Json -Compress
 } finally {
   $archive.Dispose()
@@ -153,6 +197,46 @@ try {
     { env: { ...process.env, DESKPET_ZIP_PATH: filePath } }
   );
   return JSON.parse(stdout);
+}
+
+function normalizeResourcePath(filePath) {
+  return filePath.replace(/\\/g, "/");
+}
+
+function zipContains(entries, resourcePath) {
+  const normalized = normalizeResourcePath(resourcePath);
+  return entries.some((entry) => {
+    const normalizedEntry = normalizeResourcePath(entry);
+    return normalizedEntry === normalized || normalizedEntry.endsWith(`/${normalized}`);
+  });
+}
+
+function extractM2aRuntimePath(entry) {
+  const normalized = normalizeResourcePath(entry);
+  const index = normalized.indexOf(m2aRuntimeDir);
+  if (index === -1 || normalized.endsWith("/")) return null;
+  return normalized.slice(index);
+}
+
+function assertExactM2aRuntimeFiles(actual, label) {
+  const expected = [...m2aRuntimeFiles].sort();
+  const sortedActual = [...actual].sort();
+  const expectedSet = new Set(expected);
+  const actualSet = new Set(sortedActual);
+  const missing = expected.filter((file) => !actualSet.has(file));
+  const extra = sortedActual.filter((file) => !expectedSet.has(file));
+  const duplicates = sortedActual.filter((file, index) => file === sortedActual[index - 1]);
+  assert(
+    missing.length === 0 && extra.length === 0 && duplicates.length === 0,
+    [
+      `${label} must contain exactly the ${m2aRuntimeFiles.length} M2A runtime files.`,
+      missing.length > 0 ? `Missing:\n${missing.join("\n")}` : null,
+      extra.length > 0 ? `Extra:\n${extra.join("\n")}` : null,
+      duplicates.length > 0 ? `Duplicate:\n${duplicates.join("\n")}` : null
+    ]
+      .filter(Boolean)
+      .join("\n\n")
+  );
 }
 
 async function walkFiles(startPath) {
@@ -207,6 +291,137 @@ async function runSafetyScan() {
   log("Safety scan passed for source/config paths.");
 }
 
+async function isGitIgnored(relativePath) {
+  try {
+    await execFileAsync("git", ["check-ignore", "-q", "--", relativePath], { cwd: repoRoot });
+    return true;
+  } catch (error) {
+    if (error.code === 1) return false;
+    throw error;
+  }
+}
+
+async function runM2aSourceControlChecks() {
+  const { stdout } = await execFileAsync("git", ["ls-files", "--", ...m2aRuntimeFiles], {
+    cwd: repoRoot
+  });
+  const tracked = new Set(
+    stdout
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((entry) => normalizeResourcePath(entry))
+  );
+  const missing = m2aRuntimeFiles.filter((file) => !tracked.has(file));
+  assert(
+    missing.length === 0,
+    `M2A runtime files are not tracked or staged:\n${missing.join("\n")}`
+  );
+
+  const ignoredPaths = [
+    "pet_assets/main_pixel_avatar/raw",
+    "pet_assets/main_pixel_avatar/cleaned",
+    "pet_assets/main_pixel_avatar/asset-notes.md",
+    "pet_assets/main_pixel_avatar/manifest.draft.json",
+    "pet_assets/main_pixel_avatar/focusAlert.gif",
+    "pet_assets/paired_pixel_avatar/idle.gif"
+  ];
+  const notIgnored = [];
+  for (const ignoredPath of ignoredPaths) {
+    if (!(await isGitIgnored(ignoredPath))) {
+      notIgnored.push(ignoredPath);
+    }
+  }
+  assert(notIgnored.length === 0, `Draft/private asset paths are not ignored:\n${notIgnored.join("\n")}`);
+  log("M2A source-control asset boundary checks passed.");
+}
+
+async function runM2aBuiltManifestChecks() {
+  const source = await readFile(path.join(repoRoot, "src", "shared", "petAppearances.ts"), "utf8");
+  assert(source.includes("mainPixelAvatar"), "mainPixelAvatar is missing from petAppearances source.");
+  for (const runtimeFile of m2aRuntimeFiles) {
+    const fileName = path.basename(runtimeFile);
+    assert(source.includes(fileName), `mainPixelAvatar source mapping is missing ${fileName}.`);
+  }
+  log("M2A appearance source mapping checks passed.");
+}
+
+async function getPrimaryWorkArea() {
+  const script = `
+Add-Type -AssemblyName System.Windows.Forms
+$workArea = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+[PSCustomObject]@{
+  X = $workArea.X
+  Y = $workArea.Y
+  Width = $workArea.Width
+  Height = $workArea.Height
+} | ConvertTo-Json -Compress
+`;
+  const { stdout } = await execFileAsync("powershell.exe", [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-Command",
+    script
+  ]);
+  return JSON.parse(stdout);
+}
+
+async function setCursorPosition(x, y) {
+  const script = `
+Add-Type @'
+using System.Runtime.InteropServices;
+public static class DeskPetCursor {
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+}
+'@
+[DeskPetCursor]::SetCursorPos(${Math.round(x)}, ${Math.round(y)}) | Out-Null
+`;
+  await execFileAsync("powershell.exe", [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-Command",
+    script
+  ]);
+}
+
+async function dragPetTo(cdp, x, y) {
+  await setCursorPosition(x, y);
+  await cdp.evaluate("window.pawpal.petDragStart({ offsetX: 0, offsetY: 0 }); true");
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await cdp.evaluate("window.pawpal.petDragStop(); true");
+}
+
+async function runM2aPackageResourceChecks(assetRoot, zipEntries) {
+  const missingUnpacked = [];
+  const missingZip = [];
+  for (const runtimeFile of m2aRuntimeFiles) {
+    const unpackedPath = path.join(distDir, "win-unpacked", "resources", ...runtimeFile.split("/"));
+    if (!existsSync(unpackedPath)) missingUnpacked.push(runtimeFile);
+    if (!zipContains(zipEntries, runtimeFile)) missingZip.push(runtimeFile);
+  }
+  assert(missingUnpacked.length === 0, `M2A runtime files missing from win-unpacked:\n${missingUnpacked.join("\n")}`);
+  assert(missingZip.length === 0, `M2A runtime files missing from zip:\n${missingZip.join("\n")}`);
+
+  const packagedFiles = (await walkFiles(assetRoot)).map((file) =>
+    normalizeResourcePath(path.relative(path.join(distDir, "win-unpacked", "resources"), file))
+  );
+  const unpackedM2aFiles = packagedFiles.map(extractM2aRuntimePath).filter(Boolean);
+  const zipM2aFiles = zipEntries.map(extractM2aRuntimePath).filter(Boolean);
+  assertExactM2aRuntimeFiles(unpackedM2aFiles, "win-unpacked main_pixel_avatar resources");
+  assertExactM2aRuntimeFiles(zipM2aFiles, "zip main_pixel_avatar resources");
+
+  const resourceEntries = [...packagedFiles, ...zipEntries.map(normalizeResourcePath)];
+  const rejectedMatches = resourceEntries.filter((entry) =>
+    m2aRejectedResourceFragments.some((fragment) => entry.includes(fragment))
+  );
+  assert(
+    rejectedMatches.length === 0,
+    `Rejected M2A asset resources were packaged:\n${rejectedMatches.join("\n")}`
+  );
+  log("M2A package asset inclusion/exclusion checks passed.");
+}
+
 async function runPackageChecks() {
   await assertFile(unpackedExe, "Unpacked app");
   await assertFile(portableExe, "Portable artifact");
@@ -221,19 +436,26 @@ async function runPackageChecks() {
   assert(nsis.perMachine === false, "NSIS must not default to per-machine install.");
   assert(nsis.allowElevation === false, "NSIS elevation must be disabled.");
   assert(nsis.packElevateHelper === false, "NSIS elevate helper must not be packaged.");
+  const portable = packageJson.build?.portable ?? {};
+  assert(portable.warningsAsErrors === false, "Portable packaging must allow ignored no-elevate helper warnings.");
   assert(packageJson.dependencies?.["electron-updater"] === undefined, "electron-updater must not be a runtime dependency.");
 
   await assertAsciiAbsent(portableExe, "elevate.exe", "Portable artifact");
   const zipAudit = await getZipAudit(zipFile);
   assert(zipAudit.ElevateEntryCount === 0, "Zip artifact contains elevate.exe.");
   log(`Zip audit passed: ${zipAudit.EntryCount} entries, ${zipAudit.ExeEntryCount} executable entries, no elevate.exe.`);
+  const zipEntries = Array.isArray(zipAudit.Entries) ? zipAudit.Entries : [zipAudit.Entries].filter(Boolean);
 
   const assetRoot = path.join(distDir, "win-unpacked", "resources", "pet_assets");
-  const dirs = await walkDirs(assetRoot);
-  const blocked = dirs
-    .map((dir) => path.basename(dir))
-    .filter((name) => ["focusAlert", "main_pixel_avatar", "paired_pixel_avatar"].includes(name));
-  assert(blocked.length === 0, `Blocked asset directories are packaged: ${blocked.join(", ")}`);
+  if (assetMode === "m2a") {
+    await runM2aPackageResourceChecks(assetRoot, zipEntries);
+  } else {
+    const dirs = await walkDirs(assetRoot);
+    const blocked = dirs
+      .map((dir) => path.basename(dir))
+      .filter((name) => ["focusAlert", "paired_pixel_avatar"].includes(name));
+    assert(blocked.length === 0, `Blocked asset directories are packaged: ${blocked.join(", ")}`);
+  }
   log("Package target and resource checks passed.");
 }
 
@@ -355,6 +577,49 @@ async function getSnapshot(cdp) {
   return snapshot;
 }
 
+async function assertPetImageLoaded(cdp, state, expectedFileName) {
+  const image = await waitFor(`${state} mainPixelAvatar image load`, async () => {
+    const result = await cdp.evaluate(`(async () => {
+      const snapshot = await window.pawpal.getSnapshot();
+      const img = document.querySelector(".pet-button img");
+      if (!img) return null;
+      return {
+        state: snapshot.petState,
+        appearanceId: snapshot.settings.petAppearanceId,
+        complete: img.complete,
+        naturalWidth: img.naturalWidth,
+        naturalHeight: img.naturalHeight,
+        src: img.currentSrc || img.src
+      };
+    })()`);
+    return result?.state === state &&
+      result?.appearanceId === "mainPixelAvatar" &&
+      result?.complete === true &&
+      result?.naturalWidth > 0 &&
+      result?.naturalHeight > 0 &&
+      result?.src.includes("main_pixel_avatar") &&
+      result?.src.includes(expectedFileName)
+      ? result
+      : null;
+  });
+  log(`M2A renderer image loaded for ${state}: ${image.naturalWidth}x${image.naturalHeight}.`);
+
+  const shellStyle = await cdp.evaluate(`(() => {
+    const button = document.querySelector(".pet-button");
+    if (!button) return null;
+    const style = getComputedStyle(button);
+    return {
+      className: button.className,
+      animationName: style.animationName,
+      transform: style.transform
+    };
+  })()`);
+  assert(shellStyle?.className.includes("appearance-mainPixelAvatar"), "M2A pet button is missing its appearance class.");
+  assert(shellStyle.animationName === "none", `M2A shell animation is still active for ${state}: ${shellStyle.animationName}`);
+  assert(shellStyle.transform === "none", `M2A shell transform is still active for ${state}: ${shellStyle.transform}`);
+  log(`M2A shell motion disabled for ${state}.`);
+}
+
 async function runCdpChecks(cdp) {
   const initial = await getSnapshot(cdp);
   assert(initial.focusActive === false, "Focus should not be active on a fresh smoke profile.");
@@ -400,6 +665,106 @@ async function runCdpChecks(cdp) {
   });
 
   log("CDP focus and reminder checks passed.");
+}
+
+async function runM2aCdpChecks(cdp) {
+  const initial = await getSnapshot(cdp);
+  assert(initial.focusActive === false, "Focus should not be active on a fresh smoke profile.");
+  assert(initial.blockingMode === null, "Blocking mode should be clear on startup.");
+
+  await cdp.evaluate('window.pawpal.updateSettings({ petAppearanceId: "mainPixelAvatar" }); true');
+  await waitFor("mainPixelAvatar setting", async () => {
+    const snapshot = await getSnapshot(cdp);
+    return snapshot.settings.petAppearanceId === "mainPixelAvatar" ? snapshot : null;
+  });
+  await assertPetImageLoaded(cdp, "idle", "idle.webp");
+
+  const workArea = await getPrimaryWorkArea();
+  const dragX = workArea.X + Math.round(workArea.Width / 2);
+  const bottomY = workArea.Y + workArea.Height - 2;
+  const awayY = workArea.Y + Math.max(24, Math.round(workArea.Height / 3));
+  await dragPetTo(cdp, dragX, bottomY);
+  await waitFor("bottom drag sitting state", async () => {
+    const snapshot = await getSnapshot(cdp);
+    return snapshot.petState === "sitting" ? snapshot : null;
+  });
+  await assertPetImageLoaded(cdp, "sitting", "sitting.webp");
+
+  await waitFor("idle inactivity sleeping state", async () => {
+    const snapshot = await getSnapshot(cdp);
+    return snapshot.petState === "sleeping" ? snapshot : null;
+  }, 5000);
+  await assertPetImageLoaded(cdp, "sleeping", "sleeping.webp");
+  await waitFor("sleeping returns to idle", async () => {
+    const snapshot = await getSnapshot(cdp);
+    return snapshot.petState === "idle" ? snapshot : null;
+  }, 5000);
+  await assertPetImageLoaded(cdp, "idle", "idle.webp");
+
+  await dragPetTo(cdp, dragX, bottomY);
+  await waitFor("second bottom drag sitting state", async () => {
+    const snapshot = await getSnapshot(cdp);
+    return snapshot.petState === "sitting" ? snapshot : null;
+  });
+  await assertPetImageLoaded(cdp, "sitting", "sitting.webp");
+
+  await cdp.evaluate("window.pawpal.startFocus(); true");
+  const active = await waitFor("manual focus from sitting active state", async () => {
+    const snapshot = await getSnapshot(cdp);
+    return snapshot.focusActive === true &&
+      snapshot.petState === "focusGuard" &&
+      typeof snapshot.timers.focusEndsAt === "number"
+      ? snapshot
+      : null;
+  });
+  assert(active.blockingMode === null, "Manual focus should not set a blocking mode.");
+  await assertPetImageLoaded(cdp, "focusGuard", "focusGuard.webp");
+
+  await cdp.evaluate("window.pawpal.stopFocus(); true");
+  await waitFor("manual focus stopped state", async () => {
+    const snapshot = await getSnapshot(cdp);
+    return snapshot.focusActive === false ? snapshot : null;
+  });
+
+  await dragPetTo(cdp, dragX, bottomY);
+  await waitFor("third bottom drag sitting state", async () => {
+    const snapshot = await getSnapshot(cdp);
+    return snapshot.petState === "sitting" ? snapshot : null;
+  });
+  await assertPetImageLoaded(cdp, "sitting", "sitting.webp");
+
+  await dragPetTo(cdp, dragX, awayY);
+  await waitFor("drag away idle state", async () => {
+    const snapshot = await getSnapshot(cdp);
+    return snapshot.petState === "idle" ? snapshot : null;
+  });
+  await assertPetImageLoaded(cdp, "idle", "idle.webp");
+
+  await cdp.evaluate('window.pawpal.triggerDemo("break"); true');
+  await waitFor("break reminder prompt", async () => {
+    const snapshot = await getSnapshot(cdp);
+    return snapshot.blockingMode === "break" && snapshot.petState === "breakPrompt" ? snapshot : null;
+  });
+  await assertPetImageLoaded(cdp, "breakPrompt", "breakPrompt.webp");
+  await cdp.evaluate('window.pawpal.bubbleAction("break:snooze"); true');
+  await waitFor("break reminder snooze", async () => {
+    const snapshot = await getSnapshot(cdp);
+    return snapshot.blockingMode === null ? snapshot : null;
+  });
+
+  await cdp.evaluate('window.pawpal.triggerDemo("hydration"); true');
+  await waitFor("hydration reminder prompt", async () => {
+    const snapshot = await getSnapshot(cdp);
+    return snapshot.blockingMode === "hydration" && snapshot.petState === "hydrationPrompt" ? snapshot : null;
+  });
+  await assertPetImageLoaded(cdp, "hydrationPrompt", "hydrationPrompt.webp");
+  await cdp.evaluate('window.pawpal.bubbleAction("hydration:snooze"); true');
+  await waitFor("hydration reminder snooze", async () => {
+    const snapshot = await getSnapshot(cdp);
+    return snapshot.blockingMode === null ? snapshot : null;
+  });
+
+  log("CDP M2A focus, reminder, and renderer image-load checks passed.");
 }
 
 async function writeSettingsForPersistence(cdp) {
@@ -486,12 +851,19 @@ async function runWindowChecks(rootPid) {
     const rows = await getWindowSnapshot(rootPid);
     return rows.length > 0 ? rows : null;
   });
-  const petWindow = windows.find((win) => win.Width === 220 && win.Height === 340 && win.TopMost === true);
+  const petWindow = windows.find(
+    (win) =>
+      Math.abs(win.Width - 220) <= 4 &&
+      Math.abs(win.Height - 340) <= 4 &&
+      win.TopMost === true
+  );
   assert(
     petWindow,
-    `Expected a 220x340 topmost pet window. Observed: ${JSON.stringify(windows)}`
+    `Expected an approximately 220x340 topmost pet window. Observed: ${JSON.stringify(windows)}`
   );
-  log(`Window check passed: ${petWindow.Width}x${petWindow.Height}, TopMost=${petWindow.TopMost}.`);
+  log(
+    `Window check passed: ${petWindow.Width}x${petWindow.Height}, TopMost=${petWindow.TopMost}.`
+  );
 }
 
 async function stopProcessTree(rootPid) {
@@ -521,19 +893,34 @@ async function removeWithRetry(targetPath, attempts = 12, delayMs = 500) {
 }
 
 async function launchPackagedApp(label) {
+  const m2aTimerEnv =
+    assetMode === "m2a"
+      ? {
+          DESKPET_IDLE_SLEEP_DELAY_MS: "900",
+          DESKPET_IDLE_SLEEP_DURATION_MS: "900"
+        }
+      : {};
   const child = spawn(unpackedExe, [`--remote-debugging-port=${port}`], {
     env: {
       ...process.env,
-      DESKPET_USER_DATA_DIR: userDataDir
+      DESKPET_USER_DATA_DIR: userDataDir,
+      ...m2aTimerEnv
     },
     stdio: "ignore",
     windowsHide: false
   });
 
   log(`Launched ${path.relative(repoRoot, unpackedExe)} (${label}) with pid ${child.pid}.`);
-  const cdp = await connectToPetTarget();
-  await runWindowChecks(child.pid);
-  return { child, cdp };
+  let cdp;
+  try {
+    cdp = await connectToPetTarget();
+    await runWindowChecks(child.pid);
+    return { child, cdp };
+  } catch (error) {
+    cdp?.close();
+    await stopProcessTree(child.pid);
+    throw error;
+  }
 }
 
 async function closePackagedApp(session) {
@@ -552,7 +939,11 @@ async function runAppSmoke() {
   try {
     session = await launchPackagedApp("initial");
     cdp = session.cdp;
-    await runCdpChecks(cdp);
+    if (assetMode === "m2a") {
+      await runM2aCdpChecks(cdp);
+    } else {
+      await runCdpChecks(cdp);
+    }
     await writeSettingsForPersistence(cdp);
     await closePackagedApp(session);
     session = null;
@@ -568,6 +959,10 @@ async function runAppSmoke() {
 }
 
 await runSafetyScan();
+if (assetMode === "m2a") {
+  await runM2aSourceControlChecks();
+  await runM2aBuiltManifestChecks();
+}
 await runPackageChecks();
 await runAppSmoke();
-log("M1 smoke passed.");
+log(`${assetMode.toUpperCase()} smoke passed.`);

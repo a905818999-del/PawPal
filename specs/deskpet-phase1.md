@@ -62,6 +62,7 @@ Expected: artifact exists under `dist/`; no default auto-start, auto-update, ele
 - Missing optional pet asset: renderer falls back through the existing manifest fallback path.
 - Reminder disabled: no reminder timer is scheduled for that reminder type.
 - Focus timer stopped: timer clears and state returns to idle.
+- Existing settings window hidden or minimized: reopening settings restores/shows the existing window before focusing it, instead of creating a duplicate window.
 
 ## Input And Config Boundaries
 
@@ -101,6 +102,7 @@ Required for M0/M1:
 - Tray click behavior in Windows notification area.
 - Drag behavior with mouse.
 - Settings window open/save behavior.
+- Settings window repeated-open behavior from tray and pet context menu, including minimized or hidden existing windows.
 - Short manual focus timer visual behavior.
 - Rest/hydration bubble readability.
 - Launching from packaged artifact.
@@ -129,6 +131,7 @@ Run date: 2026-05-04 on Windows.
 - Package resource check: `dist/win-unpacked/resources/pet_assets` contains only `线条小狗` and `金毛 puppy`; no `focusAlert`, `main_pixel_avatar`, or `paired_pixel_avatar` directories are present.
 - `pnpm smoke:m1`: completed with exit code 0; output confirmed source/config safety scan passed, unpacked app was 210,890,752 bytes, portable artifact was 100,014,618 bytes, zip artifact was 149,429,207 bytes, zip audit found `143` entries, `1` executable entry, and no `elevate.exe`, packaged artifact/resource checks passed, packaged pet window was `220x340 TopMost=true`, CDP focus/reminder checks passed, settings persisted after packaged restart with isolated userData, process tree cleaned, and M1 smoke passed.
 - Package helper audit: `package.json` sets `nsis.packElevateHelper=false`; portable artifact contains no ASCII `elevate.exe` marker; zip artifact has 0 `elevate.exe` entries. `dist/win-unpacked/resources/elevate.exe` remains present as a staging helper, size 107,520 bytes, SHA256 `9B1FBF0C11C520AE714AF8AA9AF12CFD48503EEDECD7398D8992EE94D1B4DC37`.
+- 2026-05-10 Ralph follow-up: settings window reuse was updated to restore minimized windows, show hidden windows, and then focus the existing instance. This addresses manual QA ID 03's "settings occasionally cannot be recalled" path; repeated-open desktop observation is still manual-only.
 
 ## Known Untested Risks
 
