@@ -24,6 +24,8 @@ import {
   APP_NAME,
   BREAK_RUN_DURATION_MS,
   BREAK_RUN_TICK_MS,
+  IDLE_SLEEP_DELAY_MS,
+  IDLE_SLEEP_DURATION_MS,
   IS_DEV,
   PET_WINDOW,
   PRELOAD_PATH,
@@ -75,6 +77,8 @@ let breakRunMovementTimer: NodeJS.Timeout | null = null;
 let breakTimer: NodeJS.Timeout | null = null;
 let hydrationTimer: NodeJS.Timeout | null = null;
 let focusTimer: NodeJS.Timeout | null = null;
+let idleSleepTimer: NodeJS.Timeout | null = null;
+let sleepReturnTimer: NodeJS.Timeout | null = null;
 let breakDueAt: number | null = null;
 let hydrationDueAt: number | null = null;
 let focusEndsAt: number | null = null;
@@ -86,6 +90,9 @@ let breakRunFormatter: ((seconds: number) => string) | null = null;
 let nextBreakRunTurnAt = 0;
 let breakMutedToday = false;
 let dragOffset: PetPosition = { x: 0, y: 0 };
+const BOTTOM_SIT_THRESHOLD_PX = 12;
+const AMBIENT_STATES = new Set<PetState>(["idle", "sitting"]);
+
 function getSettings(): Settings {
   const stored = store.get("settings");
   return {
@@ -200,9 +207,69 @@ function publishSnapshot(): void {
   sendToAll("app:snapshot", snapshot());
 }
 
+function clearIdleSleepTimer(): void {
+  if (!idleSleepTimer) return;
+  clearTimeout(idleSleepTimer);
+  idleSleepTimer = null;
+}
+
+function clearSleepReturnTimer(): void {
+  if (!sleepReturnTimer) return;
+  clearTimeout(sleepReturnTimer);
+  sleepReturnTimer = null;
+}
+
+function canRunAmbientTimers(): boolean {
+  return !blockingMode && !focusActive && Boolean(petWindow?.isVisible());
+}
+
+function scheduleIdleSleepTimer(): void {
+  clearIdleSleepTimer();
+  if (!canRunAmbientTimers() || !AMBIENT_STATES.has(petState)) return;
+  idleSleepTimer = setTimeout(() => {
+    idleSleepTimer = null;
+    if (!canRunAmbientTimers() || !AMBIENT_STATES.has(petState)) {
+      scheduleIdleSleepTimer();
+      return;
+    }
+    setPetState("sleeping");
+  }, IDLE_SLEEP_DELAY_MS);
+}
+
+function scheduleSleepReturnTimer(): void {
+  clearSleepReturnTimer();
+  if (!canRunAmbientTimers() || petState !== "sleeping") return;
+  sleepReturnTimer = setTimeout(() => {
+    sleepReturnTimer = null;
+    if (petState === "sleeping" && canRunAmbientTimers()) {
+      setPetState("idle");
+    }
+  }, IDLE_SLEEP_DURATION_MS);
+}
+
+function refreshAmbientTimers(): void {
+  if (petState === "sleeping") {
+    clearIdleSleepTimer();
+    scheduleSleepReturnTimer();
+    return;
+  }
+  clearSleepReturnTimer();
+  scheduleIdleSleepTimer();
+}
+
+function noteUserInteraction(): void {
+  clearIdleSleepTimer();
+  if (petState === "sleeping" && canRunAmbientTimers()) {
+    setPetState("idle");
+    return;
+  }
+  refreshAmbientTimers();
+}
+
 function setPetState(next: PetState): void {
   petState = next;
   sendToAll("pet:set-state", next);
+  refreshAmbientTimers();
 }
 
 function setPetFacing(next: PetFacing): void {
@@ -312,19 +379,25 @@ function createPetWindow(): void {
   petWindow.once("ready-to-show", () => {
     petWindow?.showInactive();
     updateTrayMenu();
+    refreshAmbientTimers();
     publishSnapshot();
   });
   petWindow.on("show", () => {
     updateTrayMenu();
+    refreshAmbientTimers();
     publishSnapshot();
   });
   petWindow.on("hide", () => {
     stopPetDrag();
+    clearIdleSleepTimer();
+    clearSleepReturnTimer();
     updateTrayMenu();
     publishSnapshot();
   });
   petWindow.on("closed", () => {
     stopPetDrag();
+    clearIdleSleepTimer();
+    clearSleepReturnTimer();
     petWindow = null;
     updateTrayMenu();
     publishSnapshot();
@@ -335,11 +408,14 @@ function ensurePetWindowVisible(): void {
   if (!petWindow || petWindow.isDestroyed()) createPetWindow();
   if (petWindow && !petWindow.isVisible()) petWindow.showInactive();
   updateTrayMenu();
+  refreshAmbientTimers();
   publishSnapshot();
 }
 
 function createSettingsWindow(): void {
   if (settingsWindow && !settingsWindow.isDestroyed()) {
+    if (settingsWindow.isMinimized()) settingsWindow.restore();
+    if (!settingsWindow.isVisible()) settingsWindow.show();
     settingsWindow.focus();
     return;
   }
@@ -380,6 +456,7 @@ function createTray(): void {
   tray = new Tray(createTrayImage());
   tray.setToolTip(APP_NAME);
   tray.on("click", () => {
+    noteUserInteraction();
     tray?.popUpContextMenu();
   });
   if (process.platform !== "darwin") {
@@ -395,6 +472,7 @@ function actionMenuItems(): Electron.MenuItemConstructorOptions[] {
     {
       label: dogVisible ? labels.hideDog : labels.showDog,
       click: () => {
+        noteUserInteraction();
         if (!petWindow) createPetWindow();
         if (!petWindow) return;
         if (petWindow.isVisible()) petWindow.hide();
@@ -406,6 +484,7 @@ function actionMenuItems(): Electron.MenuItemConstructorOptions[] {
     {
       label: focusActive ? labels.stopFocusMode : labels.startFocusMode,
       click: () => {
+        noteUserInteraction();
         if (focusActive) stopFocusMode(true);
         else startFocusMode();
       }
@@ -414,12 +493,36 @@ function actionMenuItems(): Electron.MenuItemConstructorOptions[] {
       ? []
       : [
           { type: "separator" as const },
-          { label: labels.demoBreakReminder, click: () => triggerDemo("break") },
-          { label: labels.demoHydrationReminder, click: () => triggerDemo("hydration") },
-          { label: labels.demoHappyReaction, click: () => triggerDemo("happy") }
+          {
+            label: labels.demoBreakReminder,
+            click: () => {
+              noteUserInteraction();
+              triggerDemo("break");
+            }
+          },
+          {
+            label: labels.demoHydrationReminder,
+            click: () => {
+              noteUserInteraction();
+              triggerDemo("hydration");
+            }
+          },
+          {
+            label: labels.demoHappyReaction,
+            click: () => {
+              noteUserInteraction();
+              triggerDemo("happy");
+            }
+          }
         ]),
     { type: "separator" },
-    { label: labels.settings, click: createSettingsWindow }
+    {
+      label: labels.settings,
+      click: () => {
+        noteUserInteraction();
+        createSettingsWindow();
+      }
+    }
   ];
 }
 
@@ -461,12 +564,20 @@ function updateTrayMenu(): void {
 }
 
 function showPetContextMenu(): void {
+  noteUserInteraction();
   const labels = text().menu;
   const template: Electron.MenuItemConstructorOptions[] = [
-    { label: labels.settings, click: createSettingsWindow },
+    {
+      label: labels.settings,
+      click: () => {
+        noteUserInteraction();
+        createSettingsWindow();
+      }
+    },
     {
       label: focusActive ? labels.stopFocusMode : labels.startFocusMode,
       click: () => {
+        noteUserInteraction();
         if (focusActive) stopFocusMode(false);
         else startFocusMode();
       }
@@ -475,14 +586,33 @@ function showPetContextMenu(): void {
       ? []
       : [
           { type: "separator" as const },
-          { label: labels.demoBreakReminder, click: () => triggerDemo("break") },
-          { label: labels.demoHydrationReminder, click: () => triggerDemo("hydration") },
-          { label: labels.demoHappyReaction, click: () => triggerDemo("happy") }
+          {
+            label: labels.demoBreakReminder,
+            click: () => {
+              noteUserInteraction();
+              triggerDemo("break");
+            }
+          },
+          {
+            label: labels.demoHydrationReminder,
+            click: () => {
+              noteUserInteraction();
+              triggerDemo("hydration");
+            }
+          },
+          {
+            label: labels.demoHappyReaction,
+            click: () => {
+              noteUserInteraction();
+              triggerDemo("happy");
+            }
+          }
         ]),
     { type: "separator" },
     {
       label: labels.hideDog,
       click: () => {
+        noteUserInteraction();
         petWindow?.hide();
         updateTrayMenu();
         sendToAll("app:snapshot", snapshot());
@@ -507,6 +637,7 @@ function movePetWithCursor(): void {
 
 function startPetDrag(offset: { offsetX: number; offsetY: number }): void {
   if (blockingMode === "breakRun" || !petWindow || petWindow.isDestroyed()) return;
+  noteUserInteraction();
   dragOffset = {
     x: Math.min(Math.max(Math.round(offset.offsetX), 0), PET_WINDOW.width),
     y: Math.min(Math.max(Math.round(offset.offsetY), 0), PET_WINDOW.height)
@@ -516,6 +647,17 @@ function startPetDrag(offset: { offsetX: number; offsetY: number }): void {
   movePetWithCursor();
   dragTimer = setInterval(movePetWithCursor, 16);
   dragSafetyTimer = setTimeout(stopPetDrag, 15_000);
+}
+
+function isPetAtWorkAreaBottom(): boolean {
+  if (!petWindow || petWindow.isDestroyed()) return false;
+  const bounds = petWindow.getBounds();
+  const workArea = screen.getDisplayNearestPoint({
+    x: bounds.x + Math.round(bounds.width / 2),
+    y: bounds.y + Math.round(bounds.height / 2)
+  }).workArea;
+  const bottomY = workArea.y + workArea.height - PET_WINDOW.height;
+  return bounds.y >= bottomY - BOTTOM_SIT_THRESHOLD_PX;
 }
 
 function stopPetDrag(): void {
@@ -530,6 +672,9 @@ function stopPetDrag(): void {
   }
   if (wasDragging) {
     persistPetPosition();
+    if (!blockingMode && !focusActive) {
+      setPetState(isPetAtWorkAreaBottom() ? "sitting" : "idle");
+    }
     sendToAll("app:snapshot", snapshot());
   }
 }
@@ -561,11 +706,11 @@ function showBreakRunCountdown(endsAt: number): void {
 }
 
 function chooseBreakRunVelocity(): PetPosition {
-  const speed = 3.5 + Math.random() * 2.9;
-  const angle = Math.random() * Math.PI * 2;
+  const direction = Math.random() < 0.5 ? -1 : 1;
+  const xSpeed = 1.6 + Math.random() * 0.8;
   return {
-    x: Math.cos(angle) * speed,
-    y: Math.sin(angle) * speed
+    x: direction * xSpeed,
+    y: (Math.random() - 0.5) * 0.5
   };
 }
 
@@ -583,7 +728,7 @@ function movePetForBreakRun(): void {
   const minY = workArea.y + 8;
   const maxY = workArea.y + workArea.height - PET_WINDOW.height - 8;
 
-  if (now >= nextBreakRunTurnAt && Math.random() < 0.45) {
+  if (now >= nextBreakRunTurnAt && Math.random() < 0.12) {
     breakRunVelocity = chooseBreakRunVelocity();
   }
 
@@ -608,7 +753,7 @@ function movePetForBreakRun(): void {
   }
 
   if (now >= nextBreakRunTurnAt) {
-    nextBreakRunTurnAt = now + 350 + Math.round(Math.random() * 850);
+    nextBreakRunTurnAt = now + 2200 + Math.round(Math.random() * 1800);
   }
 
   setPetFacing(breakRunVelocity.x >= 0 ? "right" : "left");
@@ -637,6 +782,8 @@ function finishBreakRun(): void {
 }
 
 function startBreakRun(): void {
+  clearIdleSleepTimer();
+  clearSleepReturnTimer();
   ensurePetWindowVisible();
   clearBreakRunTimers();
   blockingMode = "breakRun";
@@ -676,6 +823,7 @@ function scheduleReminderTimers(): void {
     );
   }
   publishSnapshot();
+  refreshAmbientTimers();
 }
 
 function resumeLongTermState(): void {
@@ -705,6 +853,7 @@ function happyFeedback(message: string | null = pick(text().bubble.woof), after?
 }
 
 function triggerBreakReminder(fromDemo: boolean): void {
+  if (fromDemo) noteUserInteraction();
   if (blockingMode === "breakRun") return;
   if (!fromDemo && (focusActive || breakMutedToday)) {
     scheduleReminderTimers();
@@ -728,6 +877,7 @@ function triggerBreakReminder(fromDemo: boolean): void {
 }
 
 function triggerHydrationReminder(fromDemo: boolean): void {
+  if (fromDemo) noteUserInteraction();
   if (blockingMode || (!fromDemo && focusActive)) {
     scheduleReminderTimers();
     return;
@@ -749,6 +899,7 @@ function triggerHydrationReminder(fromDemo: boolean): void {
 }
 
 function startFocusMode(): void {
+  noteUserInteraction();
   if (focusActive || blockingMode) return;
   ensurePetWindowVisible();
   const settings = getSettings();
@@ -804,6 +955,7 @@ function stopFocusMode(completed: boolean): void {
 }
 
 function triggerDemo(trigger: DemoTrigger): void {
+  noteUserInteraction();
   ensurePetWindowVisible();
   if (trigger === "break") triggerBreakReminder(true);
   if (trigger === "hydration") triggerHydrationReminder(true);
@@ -811,6 +963,7 @@ function triggerDemo(trigger: DemoTrigger): void {
 }
 
 function handleBubbleAction(actionId: string): void {
+  noteUserInteraction();
   if (actionId === "break-run:done") {
     finishBreakRun();
     return;
@@ -872,6 +1025,7 @@ function handleBubbleAction(actionId: string): void {
 function registerIpc(): void {
   ipcMain.handle("app:get-snapshot", () => snapshot());
   ipcMain.on("pet:clicked", () => {
+    noteUserInteraction();
     if (blockingMode) return;
     happyFeedback(null);
   });
@@ -882,12 +1036,19 @@ function registerIpc(): void {
   ipcMain.on("pet:drag-stop", stopPetDrag);
   ipcMain.on("bubble:action", (_event, actionId: string) => handleBubbleAction(actionId));
   ipcMain.on("settings:update", (_event, partial: Partial<Settings>) => {
+    noteUserInteraction();
     setSettings({ ...getSettings(), ...partial });
   });
   ipcMain.on("demo:trigger", (_event, trigger: DemoTrigger) => triggerDemo(trigger));
   ipcMain.on("focus:start", startFocusMode);
-  ipcMain.on("focus:stop", () => stopFocusMode(false));
-  ipcMain.on("stats:reset-today", resetTodayStats);
+  ipcMain.on("focus:stop", () => {
+    noteUserInteraction();
+    stopFocusMode(false);
+  });
+  ipcMain.on("stats:reset-today", () => {
+    noteUserInteraction();
+    resetTodayStats();
+  });
 }
 
 protocol.registerSchemesAsPrivileged([

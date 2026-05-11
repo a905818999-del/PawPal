@@ -176,7 +176,7 @@ export function PetView(): JSX.Element {
       ) : null}
 
       <button
-        className={`pet-button state-${state} ${facingClass} ${
+        className={`pet-button appearance-${appearanceId} state-${state} ${facingClass} ${
           asset.isPlaceholder ? "placeholder-asset" : ""
         }`}
         onPointerCancel={cancelPointer}

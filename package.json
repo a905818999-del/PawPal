@@ -1,6 +1,6 @@
 {
   "name": "deskpet",
-  "version": "0.1.0-m1",
+  "version": "0.1.0-m2a",
   "description": "A safe local desktop pet shell for Windows reminders and manual focus timing.",
   "author": "zebangeth",
   "license": "MIT",
@@ -11,9 +11,10 @@
     "build": "pnpm typecheck && electron-vite build",
     "typecheck": "tsc --noEmit",
     "smoke:m1": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-m1.ps1",
+    "smoke:m2a": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-m2a.ps1",
     "dist": "pnpm dist:win",
     "dist:mac": "pnpm build && electron-builder --mac",
-    "dist:win": "pnpm build && electron-builder --win",
+    "dist:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dist-win.ps1",
     "dist:win:installer": "pnpm build && electron-builder --win nsis"
   },
   "build": {
@@ -48,6 +49,9 @@
       "createStartMenuShortcut": true,
       "deleteAppDataOnUninstall": false
     },
+    "portable": {
+      "warningsAsErrors": false
+    },
     "dmg": {
       "title": "DeskPet",
       "contents": [
@@ -71,6 +75,25 @@
           "!**/focusAlert/**",
           "!main_pixel_avatar/**",
           "!paired_pixel_avatar/**"
+        ]
+      },
+      {
+        "from": "pet_assets/main_pixel_avatar",
+        "to": "pet_assets/main_pixel_avatar",
+        "filter": [
+          "idle.webp",
+          "sitting.webp",
+          "happy.webp",
+          "breakPrompt.webp",
+          "breakRunning.webp",
+          "breakDone.webp",
+          "hydrationPrompt.webp",
+          "drinking.webp",
+          "hydrationDone.webp",
+          "focusGuard.webp",
+          "focusDone.webp",
+          "sad.webp",
+          "sleeping.webp"
         ]
       }
     ]
