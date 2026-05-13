@@ -15,6 +15,40 @@ type DragRef = {
 const CONTINUOUS_ASSET_STATES = new Set<PetState>(["idle", "focusGuard"]);
 const CONTINUOUS_ASSET_ROTATION_MS = 15 * 60 * 1000;
 const DRAG_START_DISTANCE_PX = 10;
+const DEBUG_SCENE_STATES: PetState[] = [
+  "idle",
+  "sitting",
+  "happy",
+  "breakPrompt",
+  "breakRunning",
+  "breakDone",
+  "mealPrompt",
+  "eating",
+  "hydrationPrompt",
+  "drinking",
+  "hydrationDone",
+  "focusGuard",
+  "focusDone",
+  "sad",
+  "sleeping"
+];
+const DEBUG_SCENE_LABELS: Record<PetState, string> = {
+  idle: "Idle",
+  sitting: "Sitting",
+  happy: "Happy",
+  breakPrompt: "Break Prompt",
+  breakRunning: "Break Running",
+  breakDone: "Break Done",
+  mealPrompt: "Meal Prompt",
+  eating: "Eating",
+  hydrationPrompt: "Hydration Prompt",
+  drinking: "Drinking",
+  hydrationDone: "Hydration Done",
+  focusGuard: "Focus Guard",
+  focusDone: "Focus Done",
+  sad: "Sad",
+  sleeping: "Sleeping"
+};
 
 function randomVariant(count: number, previous?: number): number {
   if (count <= 1) return 0;
@@ -40,6 +74,10 @@ export function PetView(): JSX.Element {
   const [assetVariant, setAssetVariant] = useState(0);
   const [assetReplayKey, setAssetReplayKey] = useState(0);
   const [stateSignal, setStateSignal] = useState(0);
+  const [debugSceneIndex, setDebugSceneIndex] = useState(0);
+  const [debugSceneCyclerEnabled, setDebugSceneCyclerEnabled] = useState(
+    window.pawpal.debugSceneCyclerEnabled
+  );
   const dragRef = useRef<DragRef | null>(null);
   const labels = i18n(resolveLanguage(snapshot.settings.language)).settings;
 
@@ -47,18 +85,28 @@ export function PetView(): JSX.Element {
     const offBubble = window.pawpal.onShowBubble(setBubble);
     const offHide = window.pawpal.onHideBubble(() => setBubble(null));
     const offPetState = window.pawpal.onPetState(() => setStateSignal((current) => current + 1));
+    const offDebug = window.pawpal.onDebugSceneCyclerUpdated(setDebugSceneCyclerEnabled);
+    void window.pawpal.getDebugSceneCyclerEnabled().then(setDebugSceneCyclerEnabled);
     return () => {
       offBubble();
       offHide();
       offPetState();
+      offDebug();
     };
   }, []);
 
-  const state = snapshot.petState;
+  const state = debugSceneCyclerEnabled
+    ? DEBUG_SCENE_STATES[debugSceneIndex % DEBUG_SCENE_STATES.length]
+    : snapshot.petState;
+  const debugSceneLabel = DEBUG_SCENE_LABELS[state];
   const altText = `DeskPet ${state}`;
   const facingClass = snapshot.petFacing === "left" ? "facing-left" : "facing-right";
   const appearanceId = snapshot.settings.petAppearanceId;
   const asset = getPetAsset(appearanceId, state, assetVariant, assetReplayKey);
+
+  function cycleDebugScene(): void {
+    setDebugSceneIndex((current) => (current + 1) % DEBUG_SCENE_STATES.length);
+  }
 
   function finishPointerDrag(clicked: boolean): void {
     const drag = dragRef.current;
@@ -68,7 +116,12 @@ export function PetView(): JSX.Element {
       window.pawpal.petDragStop();
       return;
     }
-    if (clicked) window.pawpal.petClicked();
+    if (!clicked) return;
+    if (debugSceneCyclerEnabled) {
+      cycleDebugScene();
+      return;
+    }
+    window.pawpal.petClicked();
   }
 
   useEffect(() => {
@@ -172,6 +225,14 @@ export function PetView(): JSX.Element {
         <div className="focus-badge">
           <span>{labels.focus}</span>
           <strong>{formatFocusCountdown(snapshot.timers.focusEndsAt, now)}</strong>
+        </div>
+      ) : null}
+
+      {debugSceneCyclerEnabled ? (
+        <div className="scene-debug-badge" aria-live="polite">
+          <span>Test Scene</span>
+          <strong>{debugSceneLabel}</strong>
+          <code>{state}</code>
         </div>
       ) : null}
 

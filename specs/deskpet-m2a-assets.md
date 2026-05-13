@@ -7,9 +7,11 @@ M2A covers one selectable bundled main avatar appearance. It does not cover scen
 ## Affected Entry Points
 
 - Settings appearance selector.
+- Settings test-tools scene-cycler toggle.
 - Pet renderer asset resolution.
-- Reminder visual states.
+- Reminder visual states, including fixed daily meal reminders.
 - Manual focus visual state.
+- Test-only pet scene cycler for local asset review.
 - Windows portable/zip packaging resources.
 - Git/source-control asset rules.
 - Asset/license documentation.
@@ -19,6 +21,7 @@ M2A covers one selectable bundled main avatar appearance. It does not cover scen
 - User: selects the bundled avatar from Settings and confirms visual quality.
 - Developer: integrates approved runtime files and verifies package contents.
 - App: loads local bundled assets only. It must not read foreground apps, windows, processes, screenshots, OCR, keyboard input, mouse hooks, telemetry, or hidden network data.
+- Debug user: when `DESKPET_DEBUG_SCENE_CYCLER=1` or the unpackaged dev shell is running, clicks the pet to cycle through runtime scenes and reads the on-screen scene label. This is a visual QA aid only and must not change reminder state, stats, or packaged default behavior.
 
 ## Main Flow
 
@@ -26,13 +29,26 @@ M2A covers one selectable bundled main avatar appearance. It does not cover scen
 2. User opens Settings.
 3. User selects the M2A main avatar appearance.
 4. Pet renderer switches to the selected appearance.
-5. Rest, hydration, and manual focus flows resolve assets for their existing M1 states.
+5. Rest, meal, hydration, and manual focus flows resolve assets for their runtime states.
 6. User drags the pet to the bottom of the display work area.
 7. Pet enters `sitting`.
 8. If the pet remains in an ambient state with no DeskPet interaction for 10 minutes, it enters `sleeping`.
 9. After 10 minutes asleep, the pet returns to `idle`.
-10. User quits and restarts the app.
-11. The M2A appearance remains selected.
+10. At local `12:00` or `18:00`, the meal reminder shows `mealPrompt`.
+11. User confirms the meal reminder.
+12. Pet plays `eating`, then reuses `hydrationDone` as the shared completion feedback.
+13. User quits and restarts the app.
+14. The M2A appearance remains selected.
+
+## Test-Only Scene Cycler
+
+The pet renderer can run a debug-only click cycler for asset review. It is enabled automatically in the unpackaged dev shell and can be enabled for a packaged local test run with:
+
+```text
+DESKPET_DEBUG_SCENE_CYCLER=1
+```
+
+When enabled from Settings test tools, environment variable, or the unpackaged dev shell, a normal pet click advances through the 15 runtime states in order and displays a small `Test Scene` badge with the current scene name and state id. Dragging still uses the normal drag path. The cycler is session-only: it must not update stats, trigger reminder actions, start/stop focus, read external app context, or persist state.
 
 ## Failure Flows
 
@@ -59,47 +75,51 @@ The source run also includes extracted frame rows under:
 output/hatch_pet_runs/rourou_from_1_restore/frames/
 ```
 
-Only the required 13 runtime animated WebPs are exported into `pet_assets/main_pixel_avatar/`. The spritesheet, decoded rows, source frames, prompts, references, QA videos, and other `output/` files are not committed or packaged.
+Only the required 15 runtime animated WebPs are exported into `pet_assets/main_pixel_avatar/`. The spritesheet, decoded rows, source frames, prompts, references, QA videos, and other `output/` files are not committed or packaged.
 
 Current source-row mapping:
 
 | DeskPet state file | Source row |
 | --- | --- |
-| `idle.webp` | `idle` |
+| `idle.webp` | `idle_blink_tuned` standing idle |
 | `sitting.webp` | `jumping` |
-| `happy.webp` | `jumping` |
+| `happy.webp` | `generated_states_size_locked_2026-05-12` happy body plus `eating_noodle_stir_2026-05-13` smile face patch |
 | `sad.webp` | `failed` |
 | `sleeping.webp` | `failed` |
-| `breakPrompt.webp` | `waving` |
+| `breakPrompt.webp` | `generated_states_size_locked_2026-05-12` break prompt |
 | `breakRunning.webp` | `running-right` |
-| `breakDone.webp` | `waving` |
-| `hydrationPrompt.webp` | `waving` |
-| `drinking.webp` | `review` |
-| `hydrationDone.webp` | `jumping` |
-| `focusGuard.webp` | `review` |
-| `focusDone.webp` | `review` |
+| `breakDone.webp` | `generated_states_size_locked_2026-05-12` break done calm subset |
+| `mealPrompt.webp` | `generated_states_size_locked_2026-05-12` meal prompt |
+| `eating.webp` | `eating_noodle_stir_2026-05-13` |
+| `hydrationPrompt.webp` | `generated_states_size_locked_2026-05-12` hydration prompt |
+| `drinking.webp` | `generated_states_size_locked_2026-05-12` drinking |
+| `hydrationDone.webp` | `generated_states_size_locked_2026-05-12` hydration done |
+| `focusGuard.webp` | `generated_states_size_locked_2026-05-12` focus guard |
+| `focusDone.webp` | `generated_states_size_locked_2026-05-12` focus done |
 
-Known handoff caveat retained for this candidate: the source sheet does not have exact DeskPet-specific rows for `sitting`, `drinking`, `sleeping`, or `focusDone`, so those states use nearest available source-row subsets and require manual visual approval. A follow-up semantic repair split `happy`, `breakDone`, and `focusDone` into distinct runtime loops instead of reusing the same success pose for all three states.
+Known handoff caveat retained for this candidate: the generated size-locked export does not include a true idle loop, and the source sheet does not have exact DeskPet-specific rows for `sitting`, `drinking`, `sleeping`, or `focusDone`, so idle uses the earlier tuned standing loop while those states use nearest available source-row subsets and require manual visual approval. A follow-up semantic repair split `happy`, `breakDone`, and `focusDone` into distinct runtime loops instead of reusing the same success pose for all three states.
 
-Current runtime timing follows the earlier line-dog Xiaobai material spec, then applies slower Rourou-specific tuning for the short-frame avatar. Feedback on desktop preview found `drinking.webp` and `focusGuard.webp` too large and too fast, so those two loops now use sparse 5-frame cadence with longer holds and stable bottom-center anchors. A later manual rest-reminder preview found the prompt wave too busy and the break-run motion uncoordinated, so `breakPrompt.webp` and `hydrationPrompt.webp` were reduced to slow 9-frame wave loops with long neutral holds, while `breakRunning.webp` now uses the natural `running-right` frame order without ping-pong reversal. The break-run window movement was also damped to mostly horizontal motion with lower speed, less vertical drift, and longer turn intervals so the mirrored left/right gait does not feel jittery.
+Current runtime timing follows the earlier line-dog Xiaobai material spec, then applies slower Rourou-specific tuning for the short-frame avatar. Feedback on desktop preview found `drinking.webp` and `focusGuard.webp` too large and too fast, so those two loops now use sparse 5-frame cadence with longer holds and stable bottom-center anchors. A later manual rest-reminder preview found the prompt wave too busy and the break-run motion uncoordinated, so `breakPrompt.webp` and `hydrationPrompt.webp` were reduced to slow loops with long neutral holds, while `breakRunning.webp` uses the natural `running-right` frame order without ping-pong reversal. The break-run window movement was also damped to mostly horizontal motion with lower speed, less vertical drift, and longer turn intervals so the mirrored left/right gait does not feel jittery. On 2026-05-12, runtime `idle.webp` and `sitting.webp` were replaced from the tuned preview exports under `output/animation_preview/idle_blink_tuned_2026-05-12/` and `output/animation_preview/sitting_tuned_2026-05-12/` to test the latest blink and sitting/breathing loops in-app. The later `output/animation_preview/generated_states_size_locked_2026-05-12/` candidate replaced the non-idle runtime states from its exported WebPs. Because this candidate does not provide a standing idle export, `idle.webp` intentionally stays on `output/animation_preview/idle_blink_tuned_2026-05-12/export/idle_blink_tuned.webp`; using `02_sitting_edgeRest.webp` for idle makes the default state look seated and conflicts with the bottom-edge sitting trigger. On 2026-05-13, `scripts/repair-m2a-feedback-assets.ps1` shrank `sleeping`, rebuilt `breakRunning` from the 8-frame `running-right` source to remove repeated foot frames, and wired meal reminder runtime files. `mealPrompt.webp` comes from the size-locked candidate; `eating.webp` comes from `output/animation_preview/eating_noodle_stir_2026-05-13/`. A 2026-05-14 visual review rejected whole-frame alpha-blended in-between frames because they created ghosted double poses; the repair now uses only real key frames with repeated hold cadence and slower export timing. A follow-up review found `happy` was not visibly smiling, `breakPrompt` appeared to change size between frames, `breakDone` felt too chaotic, and hydration/focus loops were not smooth enough. The repair script now clears isolated alpha specks outside the body box, re-anchors repaired states by projected body bounds, gives `happy` the tuned eating smile face patch, skips the most chaotic `breakDone` frames, rebuilds `focusGuard`, and uses ping-pong cadence for hydration/focus/prompt loops to avoid hard end-to-start jumps.
 
-After desktop preview found visible GIF haloing, over-frequent blinking, and idle-frame jitter, the runtime pack was rebuilt from the original transparent PNG frames as animated WebP. The WebP export preserves multi-level alpha, applies an alpha-bleed edge repair on semi-transparent boundary pixels, and rewrites `idle` into a stable body loop where only the eye region changes during one slow blink. It does not modify source material under `output/`.
+After desktop preview found visible GIF haloing, over-frequent blinking, and idle-frame jitter, the runtime pack was rebuilt from the original transparent PNG frames as animated WebP. The WebP export preserves multi-level alpha and applies an alpha-bleed edge repair on semi-transparent boundary pixels. The tuned `idle` export uses a stable standing body loop where only the eye region changes during one slow blink. It does not modify source material under `output/`.
 
 | DeskPet state file | Runtime frames | Loop duration |
 | --- | ---: | ---: |
-| `idle.webp` | 5 eye-only frames | 3.5s |
-| `sitting.webp` | 3 | 4.2s |
-| `happy.webp` | 5 | 2.21s |
-| `breakPrompt.webp` | 9 | 5.36s |
-| `breakRunning.webp` | 8 | 1.28s |
-| `breakDone.webp` | 5 | 2.31s |
-| `hydrationPrompt.webp` | 9 | 5.36s |
-| `drinking.webp` | 5 | 3.5s |
-| `hydrationDone.webp` | 18 | 2.52s |
-| `focusGuard.webp` | 5 | 3.8s |
-| `focusDone.webp` | 5 | 3.08s |
-| `sad.webp` | 5 | 3.2s |
-| `sleeping.webp` | 4 | 3.8s |
+| `idle.webp` | 5 eye-only standing frames | 3.5s |
+| `sitting.webp` | 5 | 3.56s |
+| `happy.webp` | 5 key frames plus mirrored cadence | about 2s |
+| `breakPrompt.webp` | 5 key frames plus mirrored cadence | about 3.7s |
+| `breakRunning.webp` | 8 | 10fps |
+| `breakDone.webp` | 3 selected key frames plus hold cadence | about 3.6s |
+| `mealPrompt.webp` | 5 key frames plus mirrored cadence | about 3.7s |
+| `eating.webp` | 5 key frames plus mirrored cadence | about 3.3s |
+| `hydrationPrompt.webp` | 5 key frames plus mirrored cadence | about 3.7s |
+| `drinking.webp` | 5 key frames plus mirrored cadence | about 3.3s |
+| `hydrationDone.webp` | 5 key frames plus mirrored cadence | about 3.3s |
+| `focusGuard.webp` | 5 key frames plus mirrored cadence | about 6.7s |
+| `focusDone.webp` | 5 key frames plus mirrored cadence | about 3.3s |
+| `sad.webp` | 5 | 3.4s |
+| `sleeping.webp` | 5 | 5.6s |
 
 M2A uses the narrow-unignore route for final approved runtime files, because draft asset folders are currently ignored.
 
@@ -121,6 +141,8 @@ happy
 breakPrompt
 breakRunning
 breakDone
+mealPrompt
+eating
 hydrationPrompt
 drinking
 hydrationDone
@@ -149,6 +171,8 @@ pet_assets/main_pixel_avatar/happy.webp
 pet_assets/main_pixel_avatar/breakPrompt.webp
 pet_assets/main_pixel_avatar/breakRunning.webp
 pet_assets/main_pixel_avatar/breakDone.webp
+pet_assets/main_pixel_avatar/mealPrompt.webp
+pet_assets/main_pixel_avatar/eating.webp
 pet_assets/main_pixel_avatar/hydrationPrompt.webp
 pet_assets/main_pixel_avatar/drinking.webp
 pet_assets/main_pixel_avatar/hydrationDone.webp
@@ -173,6 +197,7 @@ pet_assets/main_pixel_avatar/sleeping.webp
 - Validate every M1 state resolves to an existing path.
 - Validate settings can be updated to the new appearance and survives restart.
 - Validate packaged renderer image-load success for `idle`, `breakPrompt`, `hydrationPrompt`, and `focusGuard`.
+- Validate meal demo shows `mealPrompt`, confirming the action shows `eating`, then reuses `hydrationDone`.
 - Validate the packaged M2A renderer disables generic shell `animation` and `transform` on the pet button.
 - Validate bottom drag switches to `sitting` and loads `sitting.webp`.
 - Validate manual focus can override `sitting` and load `focusGuard.webp`.
@@ -201,16 +226,14 @@ Future manifest loading should normalize any bundled JSON manifest into the exis
 
 Renderer APIs should stay stable: `getPetAsset`, `getPetAssetVariantCount`, `petAppearanceOptions`, and `resolvePetAppearanceId`.
 
-## Next Asset Regeneration Target
+## Meal Reminder Integration
 
-The next DeskPet-specific regeneration should keep the current 13 runtime states and add two meal-reminder states:
+Meal reminder states are now part of the M2A runtime:
 
-- `mealPrompt`: meal reminder prompt shown at local wall-clock `12:00` and `18:00` every day. It should read as lunch/dinner or eating-time reminder, not as hydration.
-- `eating`: eating-in-progress action after the user confirms the meal reminder. A small food prop is allowed, but the pose should keep the same character identity and desktop-pet scale.
+- `mealPrompt`: shown at local wall-clock `12:00` and `18:00` every day. It should read as lunch/dinner or eating-time reminder, not as hydration.
+- `eating`: shown after the user confirms the meal reminder. The current candidate uses the tuned noodle-stir export.
 
 `hydrationDone.webp` remains the shared completion feedback for both hydration and meal completion. Do not generate a separate `mealDone` asset unless the product requirement changes.
-
-This meal flow is not wired in the current M2A runtime yet. Code integration will require new states, fixed daily meal scheduling, bubble actions, QA/demo trigger coverage, and package checks for `mealPrompt.webp` and `eating.webp`.
 
 ## Visual Backlog Outside M2A
 
@@ -228,6 +251,7 @@ The reference photos should be used only for expression/action anchors. Do not c
 - Check animation anchor stability.
 - Check reminder bubble overlap.
 - Check visual scale at normal Windows desktop size.
+- In an unpackaged dev shell, or with `DESKPET_DEBUG_SCENE_CYCLER=1`, click the pet repeatedly and confirm the debug badge and rendered asset advance through all 15 runtime scenes.
 
 ## Known Untested Risks
 
@@ -260,10 +284,11 @@ Automated checks run during M2A development:
 - `pnpm smoke:m2a`: passed.
 - Follow-up anchor-stability check after the shell-motion fix: `pnpm typecheck` passed; `node --check scripts\smoke-m1.mjs` passed; `pnpm smoke:m2a` passed and reported `M2A shell motion disabled` for `idle`, `sitting`, `sleeping`, `focusGuard`, `breakPrompt`, and `hydrationPrompt` in the packaged renderer.
 - Rourou final spritesheet validation: `final/validation.json` reports `ok=true`, `format=WEBP`, `mode=RGBA`, `1536x1872`, no errors or warnings.
-- Runtime WebP export validation: all 13 files under `pet_assets/main_pixel_avatar/` are non-empty `256x256` transparent animated WebPs.
-- Runtime timing validation: `idle.webp` encodes a `3.5s` loop with one slow blink cluster and stable body anchor; `breakPrompt.webp` and `hydrationPrompt.webp` use sparse `9`-frame `5.36s` wave loops with long neutral holds; `breakRunning.webp` uses the natural `running-right` order as an `8`-frame `1.28s` loop; `drinking.webp` uses a sparse `5`-frame `3.5s` sip loop; `focusGuard.webp` uses a sparse `5`-frame `3.8s` guard loop; `sitting.webp`, `sleeping.webp`, `happy.webp`, `breakDone.webp`, `focusDone.webp`, and `sad.webp` were rebuilt from distinct state-specific source subsets after semantic visual review.
+- Runtime WebP export validation: all 15 files under `pet_assets/main_pixel_avatar/` are non-empty `256x256` transparent animated WebPs.
+- Runtime timing validation: `idle.webp` uses the tuned standing idle export at `3.5s`; `breakRunning.webp` is rebuilt as an 8-frame 10fps loop; `sleeping.webp` keeps 5 frames but with smaller content scale; `happy`, `breakPrompt`, `breakDone`, `mealPrompt`, `eating`, `hydrationPrompt`, `drinking`, `hydrationDone`, `focusGuard`, and `focusDone` use real key-frame exports with hold or ping-pong cadence and no alpha-blended in-between frames. The remaining stable ambient loops are `sitting.webp` `3.56s` and `sad.webp` `3.4s`.
+- 2026-05-14 feedback repair validation: `scripts/repair-m2a-feedback-assets.ps1` rebuilt `happy`, `breakPrompt`, `breakDone`, `hydrationPrompt`, `drinking`, `hydrationDone`, `focusGuard`, `focusDone`, `mealPrompt`, `eating`, `sleeping`, and `breakRunning`; repaired frame previews show stable bottom-center anchors, with `happy` using the eating smile face patch and `breakDone` using the calmer subset. `pnpm typecheck`, `pnpm smoke:m1`, `pnpm dist:win`, and `pnpm smoke:m2a` passed after stopping stale packaged DeskPet processes that had locked `dist/win-unpacked`.
 - Runtime alpha validation: the original source PNG frame has 235 alpha levels, while the old GIF export had only 2; the new WebP runtime files retain multi-level alpha after edge repair.
-- Edge cleanup validation: preview artifact `output/program_preview/idle_webp_compare.png` shows old GIF vs new WebP composited on white and dark backgrounds, `output/program_preview/idle_stabilized_frames.png` records the stabilized idle eye-only cadence, `output/program_preview/motion_review/motion_fix_frames_after.png` records the reduced `drinking` and `focusGuard` cadence, `output/program_preview/semantic_asset_review/semantic_fix_frames_after.png` records the `sitting`, `sleeping`, `happy`, `breakDone`, `focusDone`, and `sad` semantic repair, and `output/program_preview/manual_qa_repair_2026-05-10/break_prompt_running_after.png` records the slower prompt and break-run loop repair.
+- Edge cleanup validation: preview artifact `output/program_preview/idle_webp_compare.png` shows old GIF vs new WebP composited on white and dark backgrounds, `output/program_preview/idle_stabilized_frames.png` records the stabilized idle eye-only cadence, `output/program_preview/motion_review/motion_fix_frames_after.png` records the reduced `drinking` and `focusGuard` cadence, `output/program_preview/semantic_asset_review/semantic_fix_frames_after.png` records the `sitting`, `sleeping`, `happy`, `breakDone`, `focusDone`, and `sad` semantic repair, `output/program_preview/manual_qa_repair_2026-05-10/break_prompt_running_after.png` records the slower prompt and break-run loop repair, and `output/animation_preview/*_tuned_2026-05-12/qa/` records the latest `idle` and `sitting` tuned edge checks.
 - 2026-05-10 rest-reminder repair validation: `pnpm typecheck`, `node --check scripts\smoke-m1.mjs`, `pnpm dist:win`, and `pnpm smoke:m2a` passed after rebuilding `breakPrompt.webp`, `hydrationPrompt.webp`, and `breakRunning.webp`, then dampening break-run window motion; `pnpm smoke:m2a` reported packaged renderer image-load success for `breakPrompt` and `hydrationPrompt`.
 
 `pnpm smoke:m2a` evidence:
@@ -282,5 +307,5 @@ Remaining manual-only risks:
 
 - final likeness approval is still manual;
 - draft asset provenance/license is not public-release-cleared;
-- visual quality across monitor/DPI variants still needs manual desktop QA, even though the first observed GIF halo and rapid-blink artifact has been addressed in the runtime WebPs;
+- visual quality across monitor/DPI variants still needs manual desktop QA, especially the style match between the tuned standing idle and the size-locked non-idle candidate states;
 - SmartScreen/AV behavior for unsigned packages remains environment-specific.

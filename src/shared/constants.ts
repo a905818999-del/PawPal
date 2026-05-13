@@ -6,6 +6,7 @@ export const DEFAULT_SETTINGS: Settings = {
   onboardingDismissed: false,
   breakReminderEnabled: true,
   breakIntervalMinutes: 45,
+  mealReminderEnabled: true,
   hydrationReminderEnabled: true,
   hydrationIntervalMinutes: 90,
   focusDurationMinutes: 25
@@ -22,6 +23,7 @@ export function createEmptyStats(date = todayKey()): TodayStats {
   return {
     date,
     breaksTaken: 0,
+    mealsLogged: 0,
     watersLogged: 0,
     focusMinutes: 0
   };

@@ -2,7 +2,7 @@
 
 PawPal separates source code licensing from pet animation asset licensing.
 
-DeskPet M0/M1 imports PawPal assets only as validation placeholders. These assets are not treated as DeskPet's final product identity.
+DeskPet M0/M1 imported PawPal assets only as validation placeholders. These assets are not treated as DeskPet's final product identity.
 
 ## Source Code
 
@@ -16,8 +16,11 @@ These assets are not automatically covered by the MIT License unless a specific 
 
 Current built-in appearances:
 
-- `pet_assets/金毛 puppy/`
-- `pet_assets/线条小狗/`
+- Imported PawPal golden-puppy asset folder.
+- Imported PawPal line-dog asset folder.
+- `pet_assets/main_pixel_avatar/` M2A Rourou `rourou_from_1_restore` runtime animated WebP exports only.
+
+The M2A `main_pixel_avatar` pack is committed only as a runtime integration pack generated from `output/hatch_pet_runs/rourou_from_1_restore/final/spritesheet.webp`, with later tuned runtime exports such as `output/animation_preview/idle_blink_tuned_2026-05-12/`, `output/animation_preview/sitting_tuned_2026-05-12/`, `output/animation_preview/generated_states_size_locked_2026-05-12/`, and `output/animation_preview/eating_noodle_stir_2026-05-13/`. It must not be represented as public-release-cleared until the final source/provenance decision is recorded. Some DeskPet states still use nearest-row mappings from the source spritesheet, so visual approval remains required.
 
 ## Raw Working Assets
 
@@ -27,4 +30,6 @@ The raw asset folder may contain generated experiments, upstream packs, original
 
 ## Contributing Assets
 
-When contributing a new pet appearance or replacing GIFs, include clear source and license information in the pull request. Prefer assets that can be redistributed with the project, and avoid adding files whose rights are unclear.
+When contributing a new pet appearance or replacing animated assets, include clear source and license information in the pull request. Prefer assets that can be redistributed with the project, and avoid adding files whose rights are unclear.
+
+For M2A, do not commit or package raw generations, contact sheets, prompt logs, private reference material, `manifest.draft.json`, `asset-notes.md`, paired companion drafts, scenes, or `focusAlert`.

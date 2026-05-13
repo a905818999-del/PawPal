@@ -31,6 +31,8 @@ const m2aRuntimeFiles = [
   "pet_assets/main_pixel_avatar/breakPrompt.webp",
   "pet_assets/main_pixel_avatar/breakRunning.webp",
   "pet_assets/main_pixel_avatar/breakDone.webp",
+  "pet_assets/main_pixel_avatar/mealPrompt.webp",
+  "pet_assets/main_pixel_avatar/eating.webp",
   "pet_assets/main_pixel_avatar/hydrationPrompt.webp",
   "pet_assets/main_pixel_avatar/drinking.webp",
   "pet_assets/main_pixel_avatar/hydrationDone.webp",
@@ -46,6 +48,8 @@ const m2aRepresentativeStates = [
   ["sitting", "sitting.webp"],
   ["sleeping", "sleeping.webp"],
   ["breakPrompt", "breakPrompt.webp"],
+  ["mealPrompt", "mealPrompt.webp"],
+  ["eating", "eating.webp"],
   ["hydrationPrompt", "hydrationPrompt.webp"],
   ["focusGuard", "focusGuard.webp"]
 ];
@@ -77,6 +81,7 @@ const settingsKeys = [
   "breakIntervalMinutes",
   "breakReminderEnabled",
   "focusDurationMinutes",
+  "mealReminderEnabled",
   "hydrationIntervalMinutes",
   "hydrationReminderEnabled",
   "language",
@@ -87,6 +92,7 @@ const settingsKeys = [
 const persistedSettings = {
   breakReminderEnabled: false,
   breakIntervalMinutes: 17,
+  mealReminderEnabled: false,
   hydrationReminderEnabled: false,
   hydrationIntervalMinutes: 31,
   focusDurationMinutes: 12,
@@ -653,6 +659,17 @@ async function runCdpChecks(cdp) {
     return snapshot.blockingMode === null ? snapshot : null;
   });
 
+  await cdp.evaluate('window.pawpal.triggerDemo("meal"); true');
+  await waitFor("meal reminder prompt", async () => {
+    const snapshot = await getSnapshot(cdp);
+    return snapshot.blockingMode === "meal" && snapshot.petState === "mealPrompt" ? snapshot : null;
+  });
+  await cdp.evaluate('window.pawpal.bubbleAction("meal:snooze"); true');
+  await waitFor("meal reminder snooze", async () => {
+    const snapshot = await getSnapshot(cdp);
+    return snapshot.blockingMode === null ? snapshot : null;
+  });
+
   await cdp.evaluate('window.pawpal.triggerDemo("hydration"); true');
   await waitFor("hydration reminder prompt", async () => {
     const snapshot = await getSnapshot(cdp);
@@ -751,6 +768,28 @@ async function runM2aCdpChecks(cdp) {
     const snapshot = await getSnapshot(cdp);
     return snapshot.blockingMode === null ? snapshot : null;
   });
+
+  await cdp.evaluate('window.pawpal.triggerDemo("meal"); true');
+  await waitFor("meal reminder prompt", async () => {
+    const snapshot = await getSnapshot(cdp);
+    return snapshot.blockingMode === "meal" && snapshot.petState === "mealPrompt" ? snapshot : null;
+  });
+  await assertPetImageLoaded(cdp, "mealPrompt", "mealPrompt.webp");
+  await cdp.evaluate('window.pawpal.bubbleAction("meal:done"); true');
+  await waitFor("meal eating state", async () => {
+    const snapshot = await getSnapshot(cdp);
+    return snapshot.petState === "eating" && snapshot.stats.mealsLogged === 1 ? snapshot : null;
+  });
+  await assertPetImageLoaded(cdp, "eating", "eating.webp");
+  await waitFor("meal completion shared feedback", async () => {
+    const snapshot = await getSnapshot(cdp);
+    return snapshot.petState === "hydrationDone" ? snapshot : null;
+  }, 5000);
+  await assertPetImageLoaded(cdp, "hydrationDone", "hydrationDone.webp");
+  await waitFor("meal reminder completion idle", async () => {
+    const snapshot = await getSnapshot(cdp);
+    return snapshot.blockingMode === null && snapshot.petState === "idle" ? snapshot : null;
+  }, 5000);
 
   await cdp.evaluate('window.pawpal.triggerDemo("hydration"); true');
   await waitFor("hydration reminder prompt", async () => {

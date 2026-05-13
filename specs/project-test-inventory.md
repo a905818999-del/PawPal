@@ -14,7 +14,7 @@ Out of scope: full Phase 1, paired companion runtime, scenes, arbitrary user ass
 | REQ-M1-02 | `src/main/main.ts`, `src/preload/index.ts`, `src/renderer/src/components/SettingsView.tsx` | Manual focus must behave only as a user-started timer. |
 | REQ-M1-03 | `src/main/main.ts`, `src/renderer/src/components/PetView.tsx` | Transparent always-on-top pet window must launch on Windows. |
 | REQ-M1-04 | `src/main/main.ts`, `src/main/trayIcon.ts` | Tray menu must expose show/hide, manual focus, settings, and quit. |
-| REQ-M1-05 | `src/main/main.ts`, `src/renderer/src/components/SettingsView.tsx` | Rest and hydration reminder states must remain usable after safety cleanup. |
+| REQ-M1-05 | `src/main/main.ts`, `src/renderer/src/components/SettingsView.tsx` | Rest, meal, and hydration reminder states must remain usable after safety cleanup. |
 | REQ-M1-06 | `package.json`, `build/entitlements.mac.plist`, `.github/workflows/release.yml` | No default auto-start, auto-update, elevation, hidden service, telemetry, input hook, screenshot/OCR, or foreground app/window/process monitoring path may remain. |
 | REQ-M1-07 | `specs/deskpet-phase1.md` | M0/M1 entry points, flows, failure paths, verification, and known risks must be documented. |
 | REQ-M2A-01 | `src/shared/types.ts`, `src/shared/petAppearances.ts` | `mainPixelAvatar` must be a selectable bundled appearance with mappings for all M1 runtime states. |
@@ -37,12 +37,13 @@ Out of scope: full Phase 1, paired companion runtime, scenes, arbitrary user ass
 | ENTRY-UI-02 | Settings view and appearance picker | `src/renderer/src/components/SettingsView.tsx`, `src/shared/petAppearances.ts` | P0 | Settings reads `petAppearanceOptions`; `mainPixelAvatar` is in the source mapping and persists through smoke. |
 | ENTRY-STATE-01 | Rest reminder | `triggerBreakReminder`, `scripts/smoke-m1.mjs` | P0 | M2A smoke produces `breakPrompt` and verifies image load for `breakPrompt.webp`. |
 | ENTRY-STATE-02 | Hydration reminder | `triggerHydrationReminder`, `scripts/smoke-m1.mjs` | P0 | M2A smoke produces `hydrationPrompt` and verifies image load for `hydrationPrompt.webp`. |
+| ENTRY-STATE-02A | Meal reminder | `triggerMealReminder`, `scripts/smoke-m1.mjs` | P0 | M2A smoke produces `mealPrompt`, confirms into `eating`, then observes shared `hydrationDone` completion feedback. |
 | ENTRY-STATE-03 | Manual focus timer | `startFocusMode`, `stopFocusMode`, `scripts/smoke-m1.mjs` | P0 | M2A smoke verifies `focusGuard`, numeric `focusEndsAt`, and image load for `focusGuard.webp`. |
 | ENTRY-STATE-04 | Local settings and stats | `electron-store`, `src/main/main.ts`, `scripts/smoke-m1.mjs` | P0 | M2A smoke writes `mainPixelAvatar`, restarts with same isolated userData, and verifies persistence. |
 | ENTRY-STATE-05 | Bottom sitting scene | `startPetDrag`, `stopPetDrag`, `scripts/smoke-m1.mjs` | P1 | M2A smoke moves the cursor to the bottom work-area edge, verifies `sitting.webp`, verifies manual focus can override sitting, and verifies drag-away returns to `idle`. |
 | ENTRY-STATE-06 | Ambient sleeping scene | `src/main/main.ts`, `scripts/smoke-m1.mjs` | P1 | Production timers are 10 minutes idle plus 10 minutes asleep; smoke shortens them through local env vars and verifies `sleeping.webp` then return to `idle`. |
-| ENTRY-ASSET-01 | M2A appearance manifest | `src/shared/petAppearances.ts` | P0 | Source maps 13 M1 runtime states to `pet_assets/main_pixel_avatar/*.webp`. |
-| ENTRY-ASSET-02 | M2A runtime files | `pet_assets/main_pixel_avatar/*.webp` | P0 | 13 runtime WebP files are staged/tracked candidates exported from `output/hatch_pet_runs/rourou_from_1_restore/frames/`; `git ls-files` sees 13 files after staging. |
+| ENTRY-ASSET-01 | M2A appearance manifest | `src/shared/petAppearances.ts` | P0 | Source maps 15 runtime states to `pet_assets/main_pixel_avatar/*.webp`. |
+| ENTRY-ASSET-02 | M2A runtime files | `pet_assets/main_pixel_avatar/*.webp` | P0 | 15 runtime WebP files are staged/tracked candidates exported from the Rourou run and tuned preview folders; `git ls-files` sees 15 files after staging. |
 | ENTRY-ASSET-03 | Draft/private asset boundary | `.gitignore` | P0 | `focusAlert`, `raw`, `cleaned`, notes, non-runtime draft files, and `paired_pixel_avatar` remain ignored. |
 | ENTRY-PKG-01 | Portable executable | `package.json` build target | P0 | `dist/DeskPet 0.1.0-m2a.exe` exists after `pnpm dist:win`; smoke checks it has no `elevate.exe` marker. |
 | ENTRY-PKG-02 | Zip package | `package.json` build target | P0 | `dist/DeskPet-0.1.0-m2a-win.zip` exists after `pnpm dist:win`; smoke checks no `elevate.exe`. |
@@ -60,7 +61,7 @@ Out of scope: full Phase 1, paired companion runtime, scenes, arbitrary user ass
 | Shared M1 safety scan | `scripts/smoke-m1.mjs` inside `pnpm smoke:m2a` | Committed check, passing | Checks no forbidden monitoring/updater/elevation terms in source/config. |
 | Dependency audit | `pnpm audit --json` | Existing command, passing | Advisory scan only; not a full supply-chain proof. |
 | Source-control boundary check | `scripts/smoke-m1.mjs` M2A mode | Committed check, passing | Validates runtime WebPs are tracked/staged and draft/private paths are ignored. |
-| Packaged image-load check | `scripts/smoke-m1.mjs` M2A mode | Committed check, passing | Uses CDP against packaged renderer for `idle`, `sitting`, `sleeping`, `focusGuard`, `breakPrompt`, and `hydrationPrompt`. |
+| Packaged image-load check | `scripts/smoke-m1.mjs` M2A mode | Committed check, passing | Uses CDP against packaged renderer for `idle`, `sitting`, `sleeping`, `focusGuard`, `breakPrompt`, `mealPrompt`, `eating`, `hydrationDone`, and `hydrationPrompt`. |
 
 ## Product Gaps And Assumptions
 

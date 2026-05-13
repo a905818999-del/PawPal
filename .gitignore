@@ -14,6 +14,8 @@ pet_assets/main_pixel_avatar/*
 !pet_assets/main_pixel_avatar/breakPrompt.webp
 !pet_assets/main_pixel_avatar/breakRunning.webp
 !pet_assets/main_pixel_avatar/breakDone.webp
+!pet_assets/main_pixel_avatar/mealPrompt.webp
+!pet_assets/main_pixel_avatar/eating.webp
 !pet_assets/main_pixel_avatar/hydrationPrompt.webp
 !pet_assets/main_pixel_avatar/drinking.webp
 !pet_assets/main_pixel_avatar/hydrationDone.webp
