@@ -11,6 +11,8 @@ export type PetState =
   | "breakPrompt"
   | "breakRunning"
   | "breakDone"
+  | "mealPrompt"
+  | "eating"
   | "hydrationPrompt"
   | "drinking"
   | "hydrationDone"
@@ -32,7 +34,7 @@ export type SpeechBubble = {
   autoDismissMs?: number;
 };
 
-export type BlockingMode = "break" | "breakRun" | "hydration" | null;
+export type BlockingMode = "break" | "breakRun" | "hydration" | "meal" | null;
 
 export type Settings = {
   language: Language;
@@ -40,6 +42,7 @@ export type Settings = {
   onboardingDismissed: boolean;
   breakReminderEnabled: boolean;
   breakIntervalMinutes: number;
+  mealReminderEnabled: boolean;
   hydrationReminderEnabled: boolean;
   hydrationIntervalMinutes: number;
   focusDurationMinutes: number;
@@ -48,6 +51,7 @@ export type Settings = {
 export type TodayStats = {
   date: string;
   breaksTaken: number;
+  mealsLogged: number;
   watersLogged: number;
   focusMinutes: number;
 };
@@ -56,6 +60,7 @@ export type StatsHistory = Record<string, TodayStats>;
 
 export type TimerStatus = {
   breakDueAt: number | null;
+  mealDueAt: number | null;
   hydrationDueAt: number | null;
   focusEndsAt: number | null;
 };
@@ -74,6 +79,7 @@ export type AppSnapshot = {
 
 export type DemoTrigger =
   | "break"
+  | "meal"
   | "hydration"
   | "happy";
 

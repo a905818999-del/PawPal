@@ -208,10 +208,18 @@ export function SettingsView(): JSX.Element {
   const [draft, setDraft] = useState(settings);
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [debugSceneCyclerEnabled, setDebugSceneCyclerEnabled] = useState(
+    window.pawpal.debugSceneCyclerEnabled
+  );
   const now = useNow();
   const savedSettingsKey = JSON.stringify(settings);
   const language = resolveLanguage(draft.language);
   const labels = i18n(language).settings;
+  const sceneCyclerLabel = language === "zh-CN" ? "场景调试" : "Scene cycler";
+  const sceneCyclerHint =
+    language === "zh-CN"
+      ? "打开后，点击桌宠会逐个切换测试动画并显示场景名。"
+      : "When on, clicking the pet cycles test animations and shows the scene name.";
 
   const petAvatar = useMemo(
     () => getPetAsset(resolvePetAppearanceId(draft.petAppearanceId), "happy"),
@@ -232,6 +240,12 @@ export function SettingsView(): JSX.Element {
     return () => window.clearTimeout(timer);
   }, [draft, settingsDirty]);
 
+  useEffect(() => {
+    const offDebug = window.pawpal.onDebugSceneCyclerUpdated(setDebugSceneCyclerEnabled);
+    void window.pawpal.getDebugSceneCyclerEnabled().then(setDebugSceneCyclerEnabled);
+    return offDebug;
+  }, []);
+
   function updateDraft(partial: Partial<Settings>): void {
     setDraft((current) => ({ ...current, ...partial }));
     setSettingsDirty(true);
@@ -249,6 +263,7 @@ export function SettingsView(): JSX.Element {
 
       <section className="prefs__stats" aria-label={labels.today}>
         <StatCard label={labels.breaks} value={stats.breaksTaken} unit={labels.countUnit} />
+        <StatCard label={labels.meals} value={stats.mealsLogged} unit={labels.countUnit} />
         <StatCard label={labels.waters} value={stats.watersLogged} unit={labels.countUnit} />
         <StatCard label={labels.focusMin} value={stats.focusMinutes} unit={labels.minuteUnit} />
       </section>
@@ -323,6 +338,16 @@ export function SettingsView(): JSX.Element {
           }
         />
         <Row
+          label={labels.enableMealReminder}
+          control={
+            <ToggleControl
+              checked={draft.mealReminderEnabled}
+              onChange={(mealReminderEnabled) => updateDraft({ mealReminderEnabled })}
+              ariaLabel={labels.enableMealReminder}
+            />
+          }
+        />
+        <Row
           label={labels.enableHydrationReminder}
           control={
             <ToggleControl
@@ -373,19 +398,34 @@ export function SettingsView(): JSX.Element {
         </div>
       </section>
 
-      {!window.pawpal.isPackaged && (
-        <section className="prefs__group">
-          <h2 className="prefs__group-title">{labels.testTools}</h2>
+      <section className="prefs__group">
+        <h2 className="prefs__group-title">{labels.testTools}</h2>
+        <Row
+          label={sceneCyclerLabel}
+          hint={sceneCyclerHint}
+          control={
+            <ToggleControl
+              checked={debugSceneCyclerEnabled}
+              onChange={(enabled) => {
+                setDebugSceneCyclerEnabled(enabled);
+                window.pawpal.setDebugSceneCyclerEnabled(enabled);
+              }}
+              ariaLabel={sceneCyclerLabel}
+            />
+          }
+        />
+        {!window.pawpal.isPackaged ? (
           <div className="test-tools">
             <DemoChip trigger="break" label={labels.demoBreak} />
+            <DemoChip trigger="meal" label={labels.demoMeal} />
             <DemoChip trigger="hydration" label={labels.demoWater} />
             <DemoChip trigger="happy" label={labels.demoHappy} />
             <button type="button" className="pref-chip-button" onClick={window.pawpal.resetToday}>
               {labels.resetToday}
             </button>
           </div>
-        </section>
-      )}
+        ) : null}
+      </section>
 
       <section className="prefs__group prefs__group--quiet">
         <button
@@ -420,6 +460,10 @@ export function SettingsView(): JSX.Element {
               <DiagCard
                 label={labels.break}
                 value={formatTimer(snapshot.timers.breakDueAt, now, language, labels)}
+              />
+              <DiagCard
+                label={labels.meal}
+                value={formatTimer(snapshot.timers.mealDueAt, now, language, labels)}
               />
               <DiagCard
                 label={labels.water}

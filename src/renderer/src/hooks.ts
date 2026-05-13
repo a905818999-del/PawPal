@@ -5,6 +5,7 @@ import type { AppSnapshot, TodayStats } from "../../shared/types";
 const initialStats: TodayStats = {
   date: "",
   breaksTaken: 0,
+  mealsLogged: 0,
   watersLogged: 0,
   focusMinutes: 0
 };
@@ -16,6 +17,7 @@ export function useSnapshot(): AppSnapshot {
     statsHistory: {},
     timers: {
       breakDueAt: null,
+      mealDueAt: null,
       hydrationDueAt: null,
       focusEndsAt: null
     },

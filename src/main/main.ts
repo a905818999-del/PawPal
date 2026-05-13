@@ -66,6 +66,10 @@ const store = new Store<StoreSchema>({
 let petWindow: BrowserWindow | null = null;
 let settingsWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+let debugSceneCyclerEnabled =
+  process.env.DESKPET_DEBUG_SCENE_CYCLER === "1" ||
+  process.env.DESKPET_DEBUG_SCENE_CYCLER === "true" ||
+  !app.isPackaged;
 let petState: PetState = "idle";
 let petFacing: PetFacing = "right";
 let blockingMode: BlockingMode = null;
@@ -75,11 +79,13 @@ let breakRunTimer: NodeJS.Timeout | null = null;
 let breakRunCountdownTimer: NodeJS.Timeout | null = null;
 let breakRunMovementTimer: NodeJS.Timeout | null = null;
 let breakTimer: NodeJS.Timeout | null = null;
+let mealTimer: NodeJS.Timeout | null = null;
 let hydrationTimer: NodeJS.Timeout | null = null;
 let focusTimer: NodeJS.Timeout | null = null;
 let idleSleepTimer: NodeJS.Timeout | null = null;
 let sleepReturnTimer: NodeJS.Timeout | null = null;
 let breakDueAt: number | null = null;
+let mealDueAt: number | null = null;
 let hydrationDueAt: number | null = null;
 let focusEndsAt: number | null = null;
 let bubbleTimer: NodeJS.Timeout | null = null;
@@ -92,6 +98,8 @@ let breakMutedToday = false;
 let dragOffset: PetPosition = { x: 0, y: 0 };
 const BOTTOM_SIT_THRESHOLD_PX = 12;
 const AMBIENT_STATES = new Set<PetState>(["idle", "sitting"]);
+const MEAL_REMINDER_HOURS = [12, 18] as const;
+const MEAL_SNOOZE_MS = 30 * 60 * 1000;
 
 function getSettings(): Settings {
   const stored = store.get("settings");
@@ -120,36 +128,51 @@ function setSettings(next: Settings): void {
   updateTrayMenu();
 }
 
+function normalizeStats(stats: TodayStats | undefined, date = todayKey()): TodayStats {
+  const normalizedDate = stats?.date ?? date;
+  return {
+    ...createEmptyStats(normalizedDate),
+    ...stats,
+    date: normalizedDate
+  };
+}
+
 function getStatsHistory(): StatsHistory {
-  return store.get("statsHistory", {});
+  const history = store.get("statsHistory", {});
+  return Object.fromEntries(
+    Object.entries(history).map(([date, stats]) => [date, normalizeStats(stats, date)])
+  );
 }
 
 function isSameStats(left: TodayStats | undefined, right: TodayStats): boolean {
+  const normalizedLeft = left ? normalizeStats(left, right.date) : undefined;
   return Boolean(
-    left &&
-      left.date === right.date &&
-      left.breaksTaken === right.breaksTaken &&
-      left.watersLogged === right.watersLogged &&
-      left.focusMinutes === right.focusMinutes
+    normalizedLeft &&
+      normalizedLeft.date === right.date &&
+      normalizedLeft.breaksTaken === right.breaksTaken &&
+      normalizedLeft.mealsLogged === right.mealsLogged &&
+      normalizedLeft.watersLogged === right.watersLogged &&
+      normalizedLeft.focusMinutes === right.focusMinutes
   );
 }
 
 function saveStatsToHistory(stats: TodayStats): void {
-  if (!stats.date) return;
+  const normalized = normalizeStats(stats);
+  if (!normalized.date) return;
   const history = getStatsHistory();
-  if (isSameStats(history[stats.date], stats)) return;
+  if (isSameStats(history[normalized.date], normalized)) return;
   store.set("statsHistory", {
     ...history,
-    [stats.date]: stats
+    [normalized.date]: normalized
   });
 }
 
 function getStats(): TodayStats {
   const today = todayKey();
-  const stats = store.get("stats", createEmptyStats());
+  const stats = normalizeStats(store.get("stats", createEmptyStats()));
   if (stats.date !== today) {
     saveStatsToHistory(stats);
-    const current = getStatsHistory()[today] ?? createEmptyStats(today);
+    const current = normalizeStats(getStatsHistory()[today] ?? createEmptyStats(today), today);
     store.set("stats", current);
     saveStatsToHistory(current);
     return current;
@@ -180,6 +203,7 @@ function snapshot(): AppSnapshot {
     statsHistory: getStatsHistory(),
     timers: {
       breakDueAt,
+      mealDueAt,
       hydrationDueAt,
       focusEndsAt
     },
@@ -205,6 +229,11 @@ function sendToAll<T>(channel: string, payload?: T): void {
 
 function publishSnapshot(): void {
   sendToAll("app:snapshot", snapshot());
+}
+
+function setDebugSceneCyclerEnabled(enabled: boolean): void {
+  debugSceneCyclerEnabled = enabled;
+  sendToAll("debug:scene-cycler-updated", debugSceneCyclerEnabled);
 }
 
 function clearIdleSleepTimer(): void {
@@ -501,6 +530,13 @@ function actionMenuItems(): Electron.MenuItemConstructorOptions[] {
             }
           },
           {
+            label: labels.demoMealReminder,
+            click: () => {
+              noteUserInteraction();
+              triggerDemo("meal");
+            }
+          },
+          {
             label: labels.demoHydrationReminder,
             click: () => {
               noteUserInteraction();
@@ -591,6 +627,13 @@ function showPetContextMenu(): void {
             click: () => {
               noteUserInteraction();
               triggerDemo("break");
+            }
+          },
+          {
+            label: labels.demoMealReminder,
+            click: () => {
+              noteUserInteraction();
+              triggerDemo("meal");
             }
           },
           {
@@ -801,10 +844,38 @@ function startBreakRun(): void {
   publishSnapshot();
 }
 
+function nextMealDueTimestamp(now = new Date()): number {
+  for (const dayOffset of [0, 1]) {
+    for (const hour of MEAL_REMINDER_HOURS) {
+      const candidate = new Date(now);
+      candidate.setDate(now.getDate() + dayOffset);
+      candidate.setHours(hour, 0, 0, 0);
+      if (candidate.getTime() > now.getTime() + 1000) {
+        return candidate.getTime();
+      }
+    }
+  }
+  const fallback = new Date(now);
+  fallback.setDate(now.getDate() + 1);
+  fallback.setHours(MEAL_REMINDER_HOURS[0], 0, 0, 0);
+  return fallback.getTime();
+}
+
+function scheduleMealReminderAt(timestamp: number): void {
+  if (mealTimer) clearTimeout(mealTimer);
+  mealDueAt = timestamp;
+  mealTimer = setTimeout(
+    () => triggerMealReminder(false),
+    Math.max(1000, timestamp - Date.now())
+  );
+}
+
 function scheduleReminderTimers(): void {
   if (breakTimer) clearTimeout(breakTimer);
+  if (mealTimer) clearTimeout(mealTimer);
   if (hydrationTimer) clearTimeout(hydrationTimer);
   breakDueAt = null;
+  mealDueAt = null;
   hydrationDueAt = null;
 
   const settings = getSettings();
@@ -814,6 +885,9 @@ function scheduleReminderTimers(): void {
       () => triggerBreakReminder(false),
       settings.breakIntervalMinutes * 60 * 1000
     );
+  }
+  if (settings.mealReminderEnabled) {
+    scheduleMealReminderAt(nextMealDueTimestamp());
   }
   if (settings.hydrationReminderEnabled) {
     hydrationDueAt = Date.now() + settings.hydrationIntervalMinutes * 60 * 1000;
@@ -898,6 +972,31 @@ function triggerHydrationReminder(fromDemo: boolean): void {
   });
 }
 
+function triggerMealReminder(fromDemo: boolean): void {
+  if (fromDemo) noteUserInteraction();
+  if (blockingMode || (!fromDemo && focusActive)) {
+    if (!fromDemo && getSettings().mealReminderEnabled) {
+      scheduleMealReminderAt(Date.now() + MEAL_SNOOZE_MS);
+      publishSnapshot();
+    }
+    return;
+  }
+  ensurePetWindowVisible();
+  blockingMode = "meal";
+  mealDueAt = null;
+  publishSnapshot();
+  setPetState("mealPrompt");
+  const labels = text();
+  showBubble({
+    id: "meal",
+    message: pick(labels.bubble.mealReminder),
+    actions: [
+      { id: "meal:done", label: labels.actions.mealDone, kind: "primary" },
+      { id: "meal:snooze", label: labels.actions.mealSnooze }
+    ]
+  });
+}
+
 function startFocusMode(): void {
   noteUserInteraction();
   if (focusActive || blockingMode) return;
@@ -958,6 +1057,7 @@ function triggerDemo(trigger: DemoTrigger): void {
   noteUserInteraction();
   ensurePetWindowVisible();
   if (trigger === "break") triggerBreakReminder(true);
+  if (trigger === "meal") triggerMealReminder(true);
   if (trigger === "hydration") triggerHydrationReminder(true);
   if (trigger === "happy") happyFeedback(pick(text().bubble.woof));
 }
@@ -1017,6 +1117,31 @@ function handleBubbleAction(actionId: string): void {
     publishSnapshot();
     return;
   }
+  if (actionId === "meal:done") {
+    updateStats((stats) => ({ ...stats, mealsLogged: stats.mealsLogged + 1 }));
+    blockingMode = null;
+    mealDueAt = null;
+    sendToAll("app:snapshot", snapshot());
+    setPetState("eating");
+    hideBubble();
+    setTimeout(() => {
+      if (blockingMode) return;
+      setPetState("hydrationDone");
+      showBubble({ id: "meal-complete", message: pick(text().bubble.mealDone), autoDismissMs: 1800 });
+      setTimeout(() => {
+        hideBubble();
+        setPetState(focusActive ? "focusGuard" : "idle");
+        scheduleReminderTimers();
+      }, 1900);
+    }, 2600);
+    return;
+  }
+  if (actionId === "meal:snooze") {
+    resumeLongTermState();
+    scheduleMealReminderAt(Date.now() + MEAL_SNOOZE_MS);
+    publishSnapshot();
+    return;
+  }
   if (actionId === "focus:end") {
     stopFocusMode(false);
   }
@@ -1024,6 +1149,10 @@ function handleBubbleAction(actionId: string): void {
 
 function registerIpc(): void {
   ipcMain.handle("app:get-snapshot", () => snapshot());
+  ipcMain.handle("debug:get-scene-cycler-enabled", () => debugSceneCyclerEnabled);
+  ipcMain.on("debug:set-scene-cycler-enabled", (_event, enabled: boolean) =>
+    setDebugSceneCyclerEnabled(Boolean(enabled))
+  );
   ipcMain.on("pet:clicked", () => {
     noteUserInteraction();
     if (blockingMode) return;
@@ -1097,6 +1226,7 @@ app.on("before-quit", () => {
     breakRunCountdownTimer,
     breakRunMovementTimer,
     breakTimer,
+    mealTimer,
     hydrationTimer,
     focusTimer,
     bubbleTimer,

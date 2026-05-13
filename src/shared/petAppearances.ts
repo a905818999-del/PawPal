@@ -21,6 +21,8 @@ const mainPixelAvatar = (name: string): string => `pet_assets/main_pixel_avatar/
 
 const STATE_FALLBACKS: Partial<Record<PetState, PetState>> = {
   breakDone: "happy",
+  mealPrompt: "hydrationPrompt",
+  eating: "happy",
   hydrationDone: "happy",
   focusDone: "happy"
 };
@@ -43,6 +45,8 @@ export const PET_APPEARANCES: Record<PetAppearanceId, PetAppearanceManifest> = {
       breakPrompt: { path: mainPixelAvatar("breakPrompt.webp"), isPlaceholder: true },
       breakRunning: { path: mainPixelAvatar("breakRunning.webp"), isPlaceholder: true },
       breakDone: { path: mainPixelAvatar("breakDone.webp"), isPlaceholder: true },
+      mealPrompt: { path: mainPixelAvatar("mealPrompt.webp"), isPlaceholder: true },
+      eating: { path: mainPixelAvatar("eating.webp"), isPlaceholder: true },
       hydrationPrompt: { path: mainPixelAvatar("hydrationPrompt.webp"), isPlaceholder: true },
       drinking: { path: mainPixelAvatar("drinking.webp"), isPlaceholder: true },
       hydrationDone: { path: mainPixelAvatar("hydrationDone.webp"), isPlaceholder: true },

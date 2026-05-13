@@ -27,6 +27,14 @@ const api = {
   updateSettings: (settings: Partial<Settings>): void =>
     ipcRenderer.send("settings:update", settings),
   triggerDemo: (trigger: DemoTrigger): void => ipcRenderer.send("demo:trigger", trigger),
+  debugSceneCyclerEnabled:
+    process.env.DESKPET_DEBUG_SCENE_CYCLER === "1" ||
+    process.env.DESKPET_DEBUG_SCENE_CYCLER === "true" ||
+    process.defaultApp,
+  getDebugSceneCyclerEnabled: (): Promise<boolean> =>
+    ipcRenderer.invoke("debug:get-scene-cycler-enabled"),
+  setDebugSceneCyclerEnabled: (enabled: boolean): void =>
+    ipcRenderer.send("debug:set-scene-cycler-enabled", enabled),
   isPackaged: !process.defaultApp,
   assetUrl: (relativePath: string): string => {
     return `pawpal-asset://asset/${encodeURIComponent(relativePath)}`;
@@ -43,6 +51,8 @@ const api = {
     onChannel("settings:updated", callback),
   onStatsUpdated: (callback: (stats: TodayStats) => void): Unsubscribe =>
     onChannel("stats:updated", callback),
+  onDebugSceneCyclerUpdated: (callback: (enabled: boolean) => void): Unsubscribe =>
+    onChannel("debug:scene-cycler-updated", callback),
   onSnapshot: (callback: (snapshot: AppSnapshot) => void): Unsubscribe =>
     onChannel("app:snapshot", callback)
 };
